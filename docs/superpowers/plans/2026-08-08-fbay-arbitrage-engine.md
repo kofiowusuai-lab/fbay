@@ -1449,12 +1449,18 @@ export function iqrTrim (values) {
   return { kept: values.filter((v) => v >= low && v <= high), low, high }
 }
 
+/**
+ * Sample size GATES the score, spread only modulates it. These must not be
+ * independent additive terms: the spread across a single comp is trivially
+ * zero, so an additive formula hands one lucky data point most of the spread
+ * weight and reports high confidence on a sample of one.
+ */
 function confidenceFrom ({ sampleN, minSampleSize, p25, p75, med }) {
   if (!sampleN || med == null || med === 0) return 0
   const sizeScore = Math.min(1, sampleN / (minSampleSize * 2))
   const spread = (p75 - p25) / med
   const spreadScore = Math.max(0, 1 - Math.min(spread, 1))
-  return Math.round((sizeScore * 0.6 + spreadScore * 0.4) * 1000) / 1000
+  return Math.round(sizeScore * (0.6 + 0.4 * spreadScore) * 1000) / 1000
 }
 
 export function buildCompSet ({
@@ -1569,7 +1575,7 @@ test('low net profit is rejected with a named reason', () => {
   const r = applyFilters({ ...good, profit: { ...good.profit, netCents: 500 } }, DEFAULTS)
   assert.equal(r.passed, false)
   assert.equal(r.rejections[0].rule, 'min_net_profit')
-  assert.match(r.rejections[0].reason, /500/)
+  assert.match(r.rejections[0].reason, /\$5\.00/)
 })
 
 test('low sell-through is rejected', () => {

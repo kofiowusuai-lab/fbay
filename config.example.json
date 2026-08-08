@@ -1,0 +1,9 @@
+{
+  "thresholds": {
+    "minNetProfitCents": 3000,
+    "minRoi": 0.5,
+    "minSellThrough": 0.30
+  },
+  "freight": { "enabled": false },
+  "pace": { "maxListingsPerDay": 600 }
+}

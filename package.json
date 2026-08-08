@@ -1,0 +1,19 @@
+{
+  "name": "fbay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": { "fbay": "./src/cli.mjs" },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "doctor": "node src/cli.mjs doctor"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.116.0",
+    "better-sqlite3": "^13.0.3",
+    "cheerio": "^1.2.0",
+    "dotenv": "^17.4.2",
+    "playwright": "^1.62.1"
+  },
+  "engines": { "node": ">=22" }
+}
