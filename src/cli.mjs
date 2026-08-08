@@ -98,24 +98,68 @@ const COMMANDS = {
   },
 
   async login () {
-    console.log('Opening a browser. Log into Facebook, then return here. Waiting up to 5 minutes.')
+    console.log('\n  Opening a dedicated browser for FBay.')
+    console.log('  This is a SEPARATE profile from your normal Chrome, so signing in')
+    console.log('  there does not count. Log in in the window that opens.\n')
+    console.log('  Use a secondary Facebook account.\n')
+
     const session = await openSession({ headless: false })
-    await session.page.goto('https://www.facebook.com/login', { waitUntil: 'domcontentloaded' })
-    await session.page.waitForURL((u) => !/\/login/.test(String(u)), { timeout: 300000 }).catch(() => {})
-    const ok = await session.isLoggedIn()
-    console.log(ok ? 'Session saved. You are logged into Facebook.' : 'Still not logged in. Run `fbay login` again.')
-    await session.close()
+    await session.page.goto('https://www.facebook.com/login', { waitUntil: 'domcontentloaded' }).catch(() => {})
+
+    // Poll for the real success condition - the c_user cookie - rather than a
+    // URL change. Facebook keeps /login in the URL through 2FA and checkpoint
+    // redirects, so a URL watcher reports failure on a login that worked.
+    const deadline = Date.now() + 300000
+    let ok = false
+    while (Date.now() < deadline) {
+      try {
+        const cookies = await session.context.cookies('https://www.facebook.com')
+        if (cookies.some((c) => c.name === 'c_user' && c.value)) { ok = true; break }
+      } catch {
+        console.log('\n  Browser window closed before login completed.')
+        break
+      }
+      await new Promise((r) => setTimeout(r, 2000))
+    }
+
+    if (ok) {
+      console.log('\n  Logged in. Session saved to ./fb-profile - you will not need to do this again.\n')
+    } else {
+      console.log('\n  No Facebook session detected. Run `fbay login` again and complete the login')
+      console.log('  in the window FBay opens (not your normal browser).\n')
+      process.exitCode = 1
+    }
+    await session.close().catch(() => {})
   },
 
   async 'ebay-login' () {
-    console.log('Opening a browser. Sign into eBay, then return here. Waiting up to 5 minutes.')
-    console.log('Sign into an account on the marketplace you want prices from: eBay picks currency from your account and IP.')
+    console.log('\n  Opening a dedicated browser for FBay (separate from your normal Chrome).')
+    console.log('  Sign into an account on the marketplace you want prices from:')
+    console.log('  eBay picks display currency from your account and exit IP.\n')
+
     const session = await openEbaySession({ headless: false })
-    await session.page.goto('https://www.ebay.com/signin/', { waitUntil: 'domcontentloaded' })
-    await session.page.waitForURL((u) => !/signin/.test(String(u)), { timeout: 300000 }).catch(() => {})
-    const ok = await session.isSignedIn()
-    console.log(ok ? 'Session saved. You are signed into eBay.' : 'Still not signed in. Run `fbay ebay-login` again.')
-    await session.close()
+    await session.page.goto('https://www.ebay.com/signin/', { waitUntil: 'domcontentloaded' }).catch(() => {})
+
+    const deadline = Date.now() + 300000
+    let ok = false
+    while (Date.now() < deadline) {
+      try {
+        const url = session.page.url()
+        if (!/signin|checkout/i.test(url)) {
+          if (await session.isSignedIn()) { ok = true; break }
+        }
+      } catch {
+        console.log('\n  Browser window closed before sign-in completed.')
+        break
+      }
+      await new Promise((r) => setTimeout(r, 3000))
+    }
+
+    console.log(ok
+      ? '\n  Signed in. Session saved to ./ebay-profile.\n'
+      : '\n  No eBay session detected. Run `fbay ebay-login` again.\n')
+    if (!ok) process.exitCode = 1
+    await session.close().catch(() => {})
   },
 
   async watch (args) {
@@ -367,7 +411,7 @@ const COMMANDS = {
     checks.push({
       check: 'facebook session',
       ok: fb.ok === true,
-      detail: fb.__error ?? (fb.ok ? 'session valid' : 'not logged in - run: fbay login'),
+      detail: fb.__error ?? (fb.ok ? 'session valid' : 'no session in ./fb-profile (separate from your normal Chrome) - run: fbay login'),
     })
 
     const halted = scanningShouldHalt(repo)
