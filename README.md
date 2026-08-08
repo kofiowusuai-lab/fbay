@@ -30,7 +30,7 @@ Fill in `.env`:
 | Variable | Where to get it |
 |---|---|
 | `EBAY_APP_ID`, `EBAY_CERT_ID` | developer.ebay.com → My Account → Application Keys → **Production** keyset. Free, about five minutes. |
-| `ANTHROPIC_API_KEY` | console.anthropic.com |
+| `ANTHROPIC_API_KEY` **or** `OPENAI_API_KEY` | console.anthropic.com / platform.openai.com. Either works — FBay auto-detects. Force one with `FBAY_LLM_PROVIDER=openai\|anthropic`. |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Existing bot on this machine, or @BotFather |
 
 Then log into both sites once. A browser opens, you log in, the session persists:
@@ -83,6 +83,25 @@ cd dashboard && npm run dev   # http://localhost:3737
 ```
 
 The deal page shows every comp behind a valuation, including the ones that were excluded and why. Trusting the number requires seeing the evidence.
+
+## Choosing an LLM provider
+
+Identity extraction is the only place FBay uses an LLM, and it **requires vision**.
+Marketplace titles routinely read just `MacBook Pro` with no specs, so the photos
+are the only signal. A text-only model does not fail cleanly on those — it guesses,
+and a confident wrong identity is the most expensive error the system can make,
+because it then values the item against an entirely wrong set of comps.
+
+| Provider | Works | Note |
+|---|---|---|
+| Anthropic (Haiku 4.5) | yes | Default. Escalates once to Opus 5 on low confidence. |
+| OpenAI (gpt-5-mini) | yes | Set `OPENAI_API_KEY`. Escalates to gpt-5. |
+| DeepSeek | **no** | The public API is text-only, including V4 Pro/Flash. Vision exists in their web chat only. |
+| Local (Ollama) | not wired | Would work with a vision model such as Qwen2.5-VL; `src/llm-openai.mjs` is the template. |
+
+Adding a provider means one new file satisfying `{extractStructured, completeText}`
+and one line in `createLlm()`. Nothing else in the codebase knows which provider
+is in use.
 
 ## Tuning
 

@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { createOpenAiLlmClient } from './llm-openai.mjs'
 
 export const MODELS = {
   fast: 'claude-haiku-4-5-20251001',
@@ -17,20 +18,43 @@ export const MODELS = {
  * scoped to Claude Code, not to arbitrary API calls from other programs.
  */
 export function detectAuth (env = process.env, fs = null) {
-  if (env.ANTHROPIC_API_KEY) return { ok: true, mode: 'api_key', detail: 'ANTHROPIC_API_KEY set' }
-  if (env.ANTHROPIC_AUTH_TOKEN) return { ok: true, mode: 'auth_token', detail: 'ANTHROPIC_AUTH_TOKEN set' }
+  const forced = env.FBAY_LLM_PROVIDER
 
-  const home = env.HOME ?? ''
-  const dir = env.ANTHROPIC_CONFIG_DIR || (home ? `${home}/.config/anthropic` : null)
-  if (dir && fs?.existsSync?.(`${dir}/credentials`)) {
-    return { ok: true, mode: 'oauth_profile', detail: `oauth profile in ${dir}` }
+  if (forced !== 'openai') {
+    if (env.ANTHROPIC_API_KEY) return { ok: true, provider: 'anthropic', mode: 'api_key', detail: 'anthropic: ANTHROPIC_API_KEY' }
+    if (env.ANTHROPIC_AUTH_TOKEN) return { ok: true, provider: 'anthropic', mode: 'auth_token', detail: 'anthropic: ANTHROPIC_AUTH_TOKEN' }
+    const home = env.HOME ?? ''
+    const dir = env.ANTHROPIC_CONFIG_DIR || (home ? `${home}/.config/anthropic` : null)
+    if (dir && fs?.existsSync?.(`${dir}/credentials`)) {
+      return { ok: true, provider: 'anthropic', mode: 'oauth_profile', detail: `anthropic: oauth profile in ${dir}` }
+    }
   }
+
+  if (forced !== 'anthropic' && env.OPENAI_API_KEY) {
+    return { ok: true, provider: 'openai', mode: 'api_key', detail: 'openai: OPENAI_API_KEY' }
+  }
+
+  if (forced) return { ok: false, provider: forced, mode: null, detail: `FBAY_LLM_PROVIDER=${forced} but no credential for it` }
 
   return {
     ok: false,
+    provider: null,
     mode: null,
-    detail: 'no credential: set ANTHROPIC_API_KEY, or run `ant auth login` for an OAuth profile',
+    detail: 'no credential: set ANTHROPIC_API_KEY or OPENAI_API_KEY (or run `ant auth login`)',
   }
+}
+
+/**
+ * Picks a provider from whatever credential is present. Identity extraction
+ * needs VISION - Marketplace titles like "MacBook Pro" carry no specs, so the
+ * photos are the only signal. Any provider wired in here must accept images;
+ * a text-only model would guess, and a confident wrong identity is worse than
+ * no answer because it values the item against the wrong comps.
+ */
+export function createLlm (opts = {}) {
+  const auth = detectAuth(opts.env ?? process.env, opts.fs ?? null)
+  if (auth.provider === 'openai') return createOpenAiLlmClient(opts)
+  return createLlmClient(opts)
 }
 
 export function createLlmClient ({
@@ -98,5 +122,5 @@ export function createLlmClient ({
     }
   }
 
-  return { extractStructured, completeText }
+  return { provider: 'anthropic', extractStructured, completeText }
 }

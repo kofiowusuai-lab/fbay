@@ -11,7 +11,7 @@ import { getCompSet } from './comps/index.mjs'
 import { openSession } from './source/facebook/session.mjs'
 import { createFacebookSource } from './source/facebook/index.mjs'
 import { createPacer } from './source/facebook/pace.mjs'
-import { createLlmClient, detectAuth } from './llm.mjs'
+import { createLlm, detectAuth } from './llm.mjs'
 import { identify } from './identify/extract.mjs'
 import { evaluateListing, runWatch } from './watch/runner.mjs'
 import { extractFbId, parsePriceCents } from './source/facebook/parse.mjs'
@@ -238,7 +238,7 @@ const COMMANDS = {
       return
     }
     const { config, repo, browse } = buildContext()
-    const llm = createLlmClient()
+    const llm = createLlm()
 
     const session = await openSession({ headless: !process.env.FBAY_HEADED })
     const nav = await session.goto(url, { waitMs: 3000 })
@@ -315,7 +315,7 @@ const COMMANDS = {
     if (!deal) { console.error(`no deal #${id}`); process.exitCode = 1; return }
 
     const identityRow = repo.db.prepare('SELECT * FROM identities WHERE identity_key = ? LIMIT 1').get(deal.identity_key) ?? {}
-    const llm = createLlmClient()
+    const llm = createLlm()
     const r = await draftOffer({
       listing: { title: deal.title, priceCents: deal.ask_cents, city: deal.city },
       identity: { brand: identityRow.brand, model: identityRow.model, condition: identityRow.condition },
@@ -362,7 +362,7 @@ const COMMANDS = {
 
     // Either an API key or an `ant auth login` OAuth profile is acceptable.
     const auth = detectAuth(process.env, fs)
-    checks.push({ check: 'anthropic auth', ok: auth.ok, detail: auth.detail })
+    checks.push({ check: 'llm auth (vision)', ok: auth.ok, detail: auth.detail })
     checks.push({ check: 'database', ok: true, detail: JSON.stringify(repo.stats()) })
 
     const tok = await withTimeout('ebay oauth', 20000, () => browse.getToken())
@@ -423,7 +423,7 @@ const COMMANDS = {
 
   async run () {
     const { config, repo, browse } = buildContext()
-    const llm = createLlmClient()
+    const llm = createLlm()
     const notifier = createTelegramNotifier()
     const { sold, close } = await openSoldClient(config)
 
