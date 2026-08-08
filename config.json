@@ -38,8 +38,8 @@
 
   "pace": {
     "_comment": "Deliberately modest. A slow monitor that keeps the Facebook account alive is worth more than a fast one that gets checkpointed.",
-    "maxListingsPerDay": 400,
-    "maxRequestsPerHour": 90,
+    "maxListingsPerDay": 600,
+    "maxRequestsPerHour": 120,
     "minDelayMs": 2500,
     "maxDelayMs": 9000,
     "detailFetchRatio": 0.5
