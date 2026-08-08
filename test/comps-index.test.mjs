@@ -79,3 +79,20 @@ test('backing comps are persisted with their exclusion reasons', async () => {
   assert.equal(rows.length, 9)
   assert.equal(rows.find((x) => /Lot of 4/.test(x.title)).exclude_reason, 'bundle')
 })
+
+test('a currency mismatch is refused rather than converted with a guessed rate', async () => {
+  const repo = createRepo(openDb(':memory:'))
+  const sold = { fetchSold: async () => ({ ok: true, strategy: 's-card', comps: SOLD, currency: 'BRL' }) }
+  const r = await getCompSet({ identity, repo, sold, browse: fakeBrowse(120), config: DEFAULTS, now: 100 * DAY })
+  assert.equal(r.ok, false)
+  assert.equal(r.currencyMismatch, true)
+  assert.match(r.error, /BRL/)
+  assert.equal(repo.getFreshCompSet('k1', 100 * DAY), undefined)
+})
+
+test('a matching currency passes through', async () => {
+  const repo = createRepo(openDb(':memory:'))
+  const sold = { fetchSold: async () => ({ ok: true, strategy: 's-card', comps: SOLD, currency: 'USD' }) }
+  const r = await getCompSet({ identity, repo, sold, browse: fakeBrowse(120), config: DEFAULTS, now: 100 * DAY })
+  assert.equal(r.ok, true)
+})

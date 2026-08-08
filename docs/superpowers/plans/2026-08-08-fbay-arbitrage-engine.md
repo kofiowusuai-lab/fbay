@@ -1846,7 +1846,7 @@ test('search sends the marketplace header and encodes the query', async () => {
   const c = createBrowseClient({ appId: 'a', certId: 'b', fetchImpl, clock: () => 0, marketplace: 'EBAY_US' })
   await c.searchActive('iphone 13 128gb')
   const call = fetchImpl.calls[1]
-  assert.match(call.url, /q=iphone%2013%20128gb/)
+  assert.match(call.url, /q=iphone\+13\+128gb/)   // URLSearchParams encodes spaces as +
   assert.equal(call.opts.headers['X-EBAY-C-MARKETPLACE-ID'], 'EBAY_US')
 })
 
