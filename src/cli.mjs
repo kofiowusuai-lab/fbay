@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import 'dotenv/config'
+import fs from 'node:fs'
 import { loadConfig, requireEnv } from './config.mjs'
 import { openDb } from './db/db.mjs'
 import { createRepo } from './db/repo.mjs'
@@ -10,7 +11,7 @@ import { getCompSet } from './comps/index.mjs'
 import { openSession } from './source/facebook/session.mjs'
 import { createFacebookSource } from './source/facebook/index.mjs'
 import { createPacer } from './source/facebook/pace.mjs'
-import { createLlmClient } from './llm.mjs'
+import { createLlmClient, detectAuth } from './llm.mjs'
 import { identify } from './identify/extract.mjs'
 import { evaluateListing, runWatch } from './watch/runner.mjs'
 import { extractFbId, parsePriceCents } from './source/facebook/parse.mjs'
@@ -312,8 +313,12 @@ const COMMANDS = {
       }
     }
 
-    const env = requireEnv(process.env, ['EBAY_APP_ID', 'EBAY_CERT_ID', 'ANTHROPIC_API_KEY'])
-    checks.push({ check: 'env vars', ok: env.ok, detail: env.ok ? 'all set' : `missing ${env.missing.join(', ')}` })
+    const env = requireEnv(process.env, ['EBAY_APP_ID', 'EBAY_CERT_ID'])
+    checks.push({ check: 'ebay env vars', ok: env.ok, detail: env.ok ? 'all set' : `missing ${env.missing.join(', ')}` })
+
+    // Either an API key or an `ant auth login` OAuth profile is acceptable.
+    const auth = detectAuth(process.env, fs)
+    checks.push({ check: 'anthropic auth', ok: auth.ok, detail: auth.detail })
     checks.push({ check: 'database', ok: true, detail: JSON.stringify(repo.stats()) })
 
     const tok = await withTimeout('ebay oauth', 20000, () => browse.getToken())

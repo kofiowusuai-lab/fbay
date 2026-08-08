@@ -104,6 +104,7 @@ Scrapers usually die quietly: eBay changes a selector, comps return zero, and th
 - Every doctor check has a hard deadline. A wedged dependency reports "timed out", never hangs.
 - Session checks are definitive, not text sniffs: Facebook is verified by the `c_user` cookie, eBay by loading an authenticated page. An earlier text-based version reported a valid session on a profile that had never logged in.
 - A listing whose comps fail becomes `needs_review`, never a dropped row.
+- **An unknown is never treated as a pass.** If the eBay Browse API is down, the active-listing count is missing, so sell-through is recorded as `null` rather than defaulting to 100% and silently disabling the sell-through gate. Deals in that state are rejected with `sell_through_unavailable` until the count is available again.
 - A Facebook checkpoint or login wall stops the run immediately and starts an escalating cooldown.
 
 ## Account safety
@@ -116,7 +117,7 @@ Scraping Marketplace is against Facebook's terms. The realistic risk is a checkp
 node --test test/*.test.mjs
 ```
 
-190 tests, no live network. eBay parsing is asserted against a fixture captured from the live site in `test/fixtures/`.
+204 tests, no live network. eBay parsing is asserted against a fixture captured from the live site in `test/fixtures/`.
 
 ## Architecture
 

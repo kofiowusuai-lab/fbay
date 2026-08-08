@@ -5,6 +5,34 @@ export const MODELS = {
   smart: 'claude-opus-5',
 }
 
+/**
+ * Reports which credential FBay will use, without reading the secret itself.
+ *
+ * The SDK resolves credentials in its own order: ANTHROPIC_API_KEY, then
+ * ANTHROPIC_AUTH_TOKEN, then an `ant auth login` OAuth profile on disk. So an
+ * unset API key does NOT mean unauthenticated - passing `apiKey: undefined`
+ * would be wrong, because it stops the SDK falling through to the profile.
+ *
+ * A Claude Code subscription credential is deliberately not in this list: it is
+ * scoped to Claude Code, not to arbitrary API calls from other programs.
+ */
+export function detectAuth (env = process.env, fs = null) {
+  if (env.ANTHROPIC_API_KEY) return { ok: true, mode: 'api_key', detail: 'ANTHROPIC_API_KEY set' }
+  if (env.ANTHROPIC_AUTH_TOKEN) return { ok: true, mode: 'auth_token', detail: 'ANTHROPIC_AUTH_TOKEN set' }
+
+  const home = env.HOME ?? ''
+  const dir = env.ANTHROPIC_CONFIG_DIR || (home ? `${home}/.config/anthropic` : null)
+  if (dir && fs?.existsSync?.(`${dir}/credentials`)) {
+    return { ok: true, mode: 'oauth_profile', detail: `oauth profile in ${dir}` }
+  }
+
+  return {
+    ok: false,
+    mode: null,
+    detail: 'no credential: set ANTHROPIC_API_KEY, or run `ant auth login` for an OAuth profile',
+  }
+}
+
 export function createLlmClient ({
   apiKey = process.env.ANTHROPIC_API_KEY,
   anthropic = null,
@@ -12,7 +40,10 @@ export function createLlmClient ({
   retries = 2,
   sleepImpl = (ms) => new Promise((r) => setTimeout(r, ms)),
 } = {}) {
-  const api = anthropic ?? new Anthropic({ apiKey })
+  // Only pass apiKey when we actually have one. Passing an explicit undefined
+  // short-circuits the SDK's own credential chain, which would break the
+  // no-API-key OAuth-profile path.
+  const api = anthropic ?? new Anthropic(apiKey ? { apiKey } : {})
 
   async function extractStructured ({ system, user, schema, images = [], model = defaultModel, maxTokens = 1024 }) {
     const content = [

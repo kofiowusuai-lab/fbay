@@ -92,3 +92,24 @@ test('buildCompSet with zero usable comps returns a null median, not a crash', (
   assert.equal(cs.confidence, 0)
   assert.equal(cs.sellThrough, 0)
 })
+
+test('an unavailable active count yields null sell-through, NOT 100%', () => {
+  // Regression: activeCount defaulting to 0 made sellThrough = sold/sold = 1.0,
+  // which passes the 30% floor on every item. Unknown must stay unknown.
+  const now = 100 * DAY
+  const sold = Array.from({ length: 8 }, (_, i) => ({
+    title: 'Apple iPhone 13 128GB', priceCents: 30000 + i * 100, soldAt: now - i * DAY,
+  }))
+  const cs = buildCompSet({ soldComps: sold, activeCount: 0, activeCountAvailable: false, mustTokens: ['iphone'], now })
+  assert.equal(cs.sellThrough, null)
+  assert.notEqual(cs.sellThrough, 1)
+  assert.equal(cs.activeCountAvailable, false)
+  assert.equal(cs.daysOfSupply, null, 'days of supply is meaningless without an active count')
+})
+
+test('an available active count of genuinely zero is still 100%, not null', () => {
+  const now = 100 * DAY
+  const sold = [{ title: 'iPhone 13', priceCents: 30000, soldAt: now - DAY }]
+  const cs = buildCompSet({ soldComps: sold, activeCount: 0, activeCountAvailable: true, mustTokens: ['iphone'], now })
+  assert.equal(cs.sellThrough, 1, 'zero competition is a real signal, distinct from an unknown')
+})

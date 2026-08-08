@@ -86,3 +86,16 @@ test('an older listing scores lower than a fresh one', () => {
   const old = { ...good, listing: { ...good.listing, listedAt: Date.now() - 14 * 86400000 } }
   assert.ok(scoreDeal(old, DEFAULTS) < scoreDeal(good, DEFAULTS))
 })
+
+test('a null sell-through is rejected, never silently passed', () => {
+  const r = applyFilters({ ...good, compset: { ...good.compset, sellThrough: null } }, DEFAULTS)
+  assert.equal(r.passed, false)
+  assert.ok(r.rejections.some((x) => x.rule === 'sell_through_unavailable'))
+  assert.match(r.rejections.find((x) => x.rule === 'sell_through_unavailable').reason, /unknown as a pass/)
+})
+
+test('a null sell-through scores zero velocity, not full marks', () => {
+  const known = scoreDeal(good, DEFAULTS)
+  const unknown = scoreDeal({ ...good, compset: { ...good.compset, sellThrough: null } }, DEFAULTS)
+  assert.ok(unknown < known, 'an unknown must never outscore a measured good value')
+})

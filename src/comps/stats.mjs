@@ -69,6 +69,7 @@ function confidenceFrom ({ sampleN, minSampleSize, p25, p75, med }) {
 export function buildCompSet ({
   soldComps = [],
   activeCount = 0,
+  activeCountAvailable = true,
   mustTokens = [],
   now = Date.now(),
   minSampleSize = 5,
@@ -106,10 +107,14 @@ export function buildCompSet ({
   const spanDays = times.length > 1 ? Math.max(1, (Math.max(...times) - Math.min(...times)) / DAY_MS) : null
   const soldPerWeek = spanDays ? (soldCount / spanDays) * 7 : null
   const soldPerDay = soldPerWeek ? soldPerWeek / 7 : null
-  const daysOfSupply = soldPerDay && soldPerDay > 0 ? activeCount / soldPerDay : null
+  const daysOfSupply = activeCountAvailable && soldPerDay && soldPerDay > 0 ? activeCount / soldPerDay : null
 
+  // If the active-listing count is unavailable, sell-through is UNKNOWN, not
+  // 100%. Defaulting activeCount to 0 would compute soldCount/soldCount = 1.0
+  // and silently pass the sell-through gate on every item - the exact
+  // failure-looks-like-success trap the canaries exist to catch.
   const denom = soldCount + activeCount
-  const sellThrough = denom > 0 ? soldCount / denom : 0
+  const sellThrough = !activeCountAvailable ? null : (denom > 0 ? soldCount / denom : 0)
 
   return {
     identityKey,
@@ -120,6 +125,7 @@ export function buildCompSet ({
     sampleN: soldCount,
     rawN: soldComps.length,
     activeCount,
+    activeCountAvailable,
     soldCount,
     sellThrough,
     soldPerWeek,

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createLlmClient, MODELS } from '../src/llm.mjs'
+import { createLlmClient, MODELS, detectAuth } from '../src/llm.mjs'
 
 function fakeAnthropic (responses) {
   const calls = []
@@ -88,4 +88,39 @@ test('token usage is reported back for cost tracking', async () => {
   const client = createLlmClient({ anthropic: fakeAnthropic([toolResponse({ brand: 'Apple' })]) })
   const r = await client.extractStructured({ system: 's', user: 'u', schema: SCHEMA })
   assert.equal(r.usage.input_tokens, 10)
+})
+
+test('detectAuth prefers an explicit API key', () => {
+  const r = detectAuth({ ANTHROPIC_API_KEY: 'sk-x' })
+  assert.equal(r.ok, true)
+  assert.equal(r.mode, 'api_key')
+})
+
+test('detectAuth falls back to ANTHROPIC_AUTH_TOKEN', () => {
+  const r = detectAuth({ ANTHROPIC_AUTH_TOKEN: 'tok' })
+  assert.equal(r.mode, 'auth_token')
+})
+
+test('detectAuth recognises an ant auth login OAuth profile', () => {
+  const fakeFs = { existsSync: (p) => p === '/home/me/.config/anthropic/credentials' }
+  const r = detectAuth({ HOME: '/home/me' }, fakeFs)
+  assert.equal(r.ok, true)
+  assert.equal(r.mode, 'oauth_profile')
+})
+
+test('detectAuth reports both remedies when nothing is configured', () => {
+  const r = detectAuth({ HOME: '/home/me' }, { existsSync: () => false })
+  assert.equal(r.ok, false)
+  assert.match(r.detail, /ANTHROPIC_API_KEY/)
+  assert.match(r.detail, /ant auth login/)
+})
+
+test('the client does not pass an explicit undefined apiKey, which would break the profile path', () => {
+  // Regression guard: `new Anthropic({apiKey: undefined})` stops the SDK
+  // falling through to an OAuth profile on disk.
+  const seen = []
+  class FakeAnthropic { constructor (opts) { seen.push(opts) } }
+  createLlmClient({ apiKey: undefined, anthropic: new FakeAnthropic({ sentinel: true }) })
+  const real = createLlmClient.toString()
+  assert.match(real, /apiKey \? \{ apiKey \} : \{\}/)
 })

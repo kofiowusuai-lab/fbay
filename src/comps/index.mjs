@@ -12,6 +12,7 @@ function rowToCompSet (row, minSampleSize) {
     activeCount: row.active_count,
     soldCount: row.sold_count,
     sellThrough: row.sell_through,
+    activeCountAvailable: row.active_count_available === 1,
     soldPerWeek: row.sold_per_week,
     daysOfSupply: row.days_of_supply,
     confidence: row.confidence,
@@ -59,13 +60,18 @@ export async function getCompSet ({ identity, repo, sold, browse, config, now = 
   }
 
   let activeCount = 0
+  let activeCountAvailable = true
   const browseRes = await browse.searchActive(identity.query)
   if (browseRes.ok) activeCount = browseRes.total
-  else warnings.push(`active-listing count unavailable: ${browseRes.error}`)
+  else {
+    activeCountAvailable = false
+    warnings.push(`active-listing count unavailable: ${browseRes.error}`)
+  }
 
   const built = buildCompSet({
     soldComps: soldRes.comps,
     activeCount,
+    activeCountAvailable,
     mustTokens: identity.mustTokens,
     now,
     minSampleSize: config.thresholds.minCompSampleSize,

@@ -14,5 +14,28 @@ export function openDb (dbPath = process.env.FBAY_DB_PATH || './data/fbay.db') {
   if (dbPath !== ':memory:') db.pragma('journal_mode = WAL')
   const schema = fs.readFileSync(path.join(HERE, 'schema.sql'), 'utf8')
   db.exec(schema)
+  migrate(db)
   return db
+}
+
+/**
+ * CREATE TABLE IF NOT EXISTS never alters an existing table, so a schema change
+ * needs an explicit migration. compsets/comps are pure cache - derived entirely
+ * from eBay and rebuilt on the next fetch - so dropping them is safe and costs
+ * nothing but one refetch. Never do this to listings or deals.
+ */
+export function migrate (db) {
+  const cols = db.prepare('PRAGMA table_info(compsets)').all()
+  const sellThrough = cols.find((c) => c.name === 'sell_through')
+  const hasAvailability = cols.some((c) => c.name === 'active_count_available')
+
+  if (sellThrough && (sellThrough.notnull === 1 || !hasAvailability)) {
+    const schema = fs.readFileSync(path.join(HERE, 'schema.sql'), 'utf8')
+    db.exec('PRAGMA foreign_keys = OFF')
+    db.exec('DROP TABLE IF EXISTS comps; DROP TABLE IF EXISTS compsets;')
+    db.exec(schema)
+    db.exec('PRAGMA foreign_keys = ON')
+    return { migrated: true, rebuilt: ['compsets', 'comps'] }
+  }
+  return { migrated: false, rebuilt: [] }
 }

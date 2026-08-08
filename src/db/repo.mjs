@@ -16,8 +16,8 @@ export function createRepo (db) {
       VALUES (@fbId, @watchId, @title, @description, @priceCents, @url, @city, @imageUrls, @sellerName, @listedAt, @seenAt, @seenAt, @delivery, @raw)`),
     identity: stmt(`INSERT OR REPLACE INTO identities (content_hash, identity_key, brand, model, variant, capacity, model_year, category, condition, identity_confidence, query, must_tokens, weight_lb, model_used, created_at)
       VALUES (@contentHash, @identityKey, @brand, @model, @variant, @capacity, @modelYear, @category, @condition, @identityConfidence, @query, @mustTokens, @weightLb, @modelUsed, @createdAt)`),
-    compset: stmt(`INSERT INTO compsets (identity_key, marketplace, trimmed_median_cents, p25_cents, p75_cents, sample_n, raw_n, active_count, sold_count, sell_through, sold_per_week, days_of_supply, confidence, fetched_at, expires_at)
-      VALUES (@identityKey, @marketplace, @trimmedMedianCents, @p25Cents, @p75Cents, @sampleN, @rawN, @activeCount, @soldCount, @sellThrough, @soldPerWeek, @daysOfSupply, @confidence, @fetchedAt, @expiresAt)`),
+    compset: stmt(`INSERT INTO compsets (identity_key, marketplace, trimmed_median_cents, p25_cents, p75_cents, sample_n, raw_n, active_count, sold_count, sell_through, active_count_available, sold_per_week, days_of_supply, confidence, fetched_at, expires_at)
+      VALUES (@identityKey, @marketplace, @trimmedMedianCents, @p25Cents, @p75Cents, @sampleN, @rawN, @activeCount, @soldCount, @sellThrough, @activeCountAvailable, @soldPerWeek, @daysOfSupply, @confidence, @fetchedAt, @expiresAt)`),
     comp: stmt(`INSERT INTO comps (compset_id, ebay_item_id, title, price_cents, shipping_cents, sold_at, condition, url, included, exclude_reason)
       VALUES (@compsetId, @ebayItemId, @title, @priceCents, @shippingCents, @soldAt, @condition, @url, @included, @excludeReason)`),
   }
@@ -115,7 +115,8 @@ export function createRepo (db) {
           rawN: cs.rawN,
           activeCount: cs.activeCount,
           soldCount: cs.soldCount,
-          sellThrough: cs.sellThrough,
+          sellThrough: cs.sellThrough ?? null,
+          activeCountAvailable: cs.activeCountAvailable === false ? 0 : 1,
           soldPerWeek: cs.soldPerWeek ?? null,
           daysOfSupply: cs.daysOfSupply ?? null,
           confidence: cs.confidence,

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { openDb } from '../src/db/db.mjs'
+import { openDb, migrate } from '../src/db/db.mjs'
 import { createRepo } from '../src/db/repo.mjs'
 
 function freshRepo () {
@@ -71,4 +71,45 @@ test('recordCanary tracks consecutive failures and resets on success', () => {
   assert.equal(repo.getCanary('ebay_sold').consecutive_failures, 2)
   repo.recordCanary('ebay_sold', true, 300)
   assert.equal(repo.getCanary('ebay_sold').consecutive_failures, 0)
+})
+
+test('migrate rebuilds a legacy compsets table with NOT NULL sell_through', () => {
+  const db = openDb(':memory:')
+  // Simulate the pre-fix schema.
+  db.exec('PRAGMA foreign_keys = OFF; DROP TABLE comps; DROP TABLE compsets;')
+  db.exec(`CREATE TABLE compsets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, identity_key TEXT NOT NULL, marketplace TEXT NOT NULL,
+    trimmed_median_cents INTEGER, p25_cents INTEGER, p75_cents INTEGER, sample_n INTEGER NOT NULL,
+    raw_n INTEGER NOT NULL, active_count INTEGER NOT NULL, sold_count INTEGER NOT NULL,
+    sell_through REAL NOT NULL, sold_per_week REAL, days_of_supply REAL, confidence REAL NOT NULL,
+    fetched_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)`)
+
+  const before = db.prepare('PRAGMA table_info(compsets)').all()
+  assert.equal(before.find((c) => c.name === 'sell_through').notnull, 1)
+
+  const r = migrate(db)
+  assert.equal(r.migrated, true)
+  assert.deepEqual(r.rebuilt, ['compsets', 'comps'])
+
+  const after = db.prepare('PRAGMA table_info(compsets)').all()
+  assert.equal(after.find((c) => c.name === 'sell_through').notnull, 0, 'sell_through must accept null')
+  assert.ok(after.some((c) => c.name === 'active_count_available'))
+})
+
+test('migrate is a no-op on a current schema', () => {
+  const db = openDb(':memory:')
+  assert.equal(migrate(db).migrated, false)
+})
+
+test('a null sell-through persists and reads back as null', () => {
+  const repo = freshRepo()
+  const { id } = repo.saveCompSet({
+    identityKey: 'k9', marketplace: 'EBAY_US', trimmedMedianCents: 30000, p25Cents: 29000, p75Cents: 31000,
+    sampleN: 8, rawN: 10, activeCount: 0, soldCount: 8, sellThrough: null, activeCountAvailable: false,
+    soldPerWeek: 2, daysOfSupply: null, confidence: 0.6, fetchedAt: 1000, expiresAt: 9000,
+  }, [])
+  const row = repo.getFreshCompSet('k9', 2000)
+  assert.equal(row.sell_through, null)
+  assert.equal(row.active_count_available, 0)
+  assert.ok(id)
 })

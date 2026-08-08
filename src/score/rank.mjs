@@ -13,7 +13,7 @@ export function scoreDeal ({ listing, identity, compset, profit, priceDrop }, co
 
   const profitScore = saturate(profit.netCents ?? 0, PROFIT_HALF_CENTS)
   const roiScore = saturate(profit.roi ?? 0, ROI_HALF)
-  const velocityScore = Math.min(1, Math.max(0, compset.sellThrough))
+  const velocityScore = compset.sellThrough == null ? 0 : Math.min(1, Math.max(0, compset.sellThrough))
   const confidenceScore = Math.min(1, Math.max(0, identity.identityConfidence * compset.confidence))
 
   const hours = listing.listedAt ? Math.max(0, (now - listing.listedAt) / 3600000) : AGE_HALF_HOURS

@@ -24,7 +24,12 @@ export function applyFilters ({ listing, identity, compset, profit }, config) {
     }
   }
 
-  if (compset.sellThrough < t.minSellThrough) {
+  if (compset.sellThrough == null) {
+    rejections.push({
+      rule: 'sell_through_unavailable',
+      reason: 'sell-through could not be computed (eBay active-listing count unavailable) - refusing to treat an unknown as a pass',
+    })
+  } else if (compset.sellThrough < t.minSellThrough) {
     rejections.push({ rule: 'min_sell_through', reason: `sell-through ${(compset.sellThrough * 100).toFixed(0)}% below floor ${(t.minSellThrough * 100).toFixed(0)}%` })
   }
 

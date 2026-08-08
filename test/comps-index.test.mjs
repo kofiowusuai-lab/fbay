@@ -61,13 +61,20 @@ test('a sold-fetch failure returns ok:false and persists nothing', async () => {
   assert.equal(repo.getFreshCompSet('k1', 1), undefined)
 })
 
-test('a browse failure degrades to activeCount 0 rather than failing the whole compset', async () => {
+test('a browse failure still yields a valuation, but marks sell-through unknown', async () => {
+  // The valuation (median sold) does not depend on the active count, so the
+  // compset survives. Sell-through does depend on it, so it becomes null.
+  // An earlier version of this test asserted sellThrough === 1 here - that
+  // assertion WAS the bug: it made the sell-through gate a no-op whenever the
+  // Browse API was down.
   const repo = createRepo(openDb(':memory:'))
   const browse = { searchActive: async () => ({ ok: false, error: 'rate limited' }) }
   const r = await getCompSet({ identity, repo, sold: fakeSold(SOLD), browse, config: DEFAULTS, now: 100 * DAY })
   assert.equal(r.ok, true)
+  assert.ok(r.compset.trimmedMedianCents > 0, 'valuation is independent of the active count')
   assert.equal(r.compset.activeCount, 0)
-  assert.equal(r.compset.sellThrough, 1)
+  assert.equal(r.compset.sellThrough, null)
+  assert.notEqual(r.compset.sellThrough, 1)
   assert.ok(r.warnings.some((w) => /rate limited/.test(w)))
 })
 
@@ -95,4 +102,24 @@ test('a matching currency passes through', async () => {
   const sold = { fetchSold: async () => ({ ok: true, strategy: 's-card', comps: SOLD, currency: 'USD' }) }
   const r = await getCompSet({ identity, repo, sold, browse: fakeBrowse(120), config: DEFAULTS, now: 100 * DAY })
   assert.equal(r.ok, true)
+})
+
+test('a browse failure produces an unknown sell-through, not a free pass', async () => {
+  const repo = createRepo(openDb(':memory:'))
+  const browse = { searchActive: async () => ({ ok: false, error: 'ebay 401' }) }
+  const r = await getCompSet({ identity, repo, sold: fakeSold(SOLD), browse, config: DEFAULTS, now: 100 * DAY })
+  assert.equal(r.ok, true)
+  assert.equal(r.compset.sellThrough, null)
+  assert.equal(r.compset.activeCountAvailable, false)
+  assert.ok(r.warnings.some((w) => /401/.test(w)))
+})
+
+test('the unknown-sell-through flag survives a round trip through the cache', async () => {
+  const repo = createRepo(openDb(':memory:'))
+  const browse = { searchActive: async () => ({ ok: false, error: 'ebay 401' }) }
+  await getCompSet({ identity, repo, sold: fakeSold(SOLD), browse, config: DEFAULTS, now: 100 * DAY })
+  const cached = await getCompSet({ identity, repo, sold: fakeSold(SOLD), browse, config: DEFAULTS, now: 100 * DAY + 1000 })
+  assert.equal(cached.cached, true)
+  assert.equal(cached.compset.sellThrough, null, 'a cached unknown must not resurrect as a pass')
+  assert.equal(cached.compset.activeCountAvailable, false)
 })
