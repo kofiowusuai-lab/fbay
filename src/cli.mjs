@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import 'dotenv/config'
 import fs from 'node:fs'
+import path from 'node:path'
 import { loadConfig, requireEnv } from './config.mjs'
 import { openDb } from './db/db.mjs'
 import { createRepo } from './db/repo.mjs'
 import { createBrowseClient } from './comps/ebay-browse.mjs'
 import { createSoldClient } from './comps/ebay-sold.mjs'
-import { openEbaySession, createBrowserSoldClient } from './comps/ebay-browser.mjs'
+import { openEbaySession, createBrowserSoldClient, createBrowserBrowseClient } from './comps/ebay-browser.mjs'
 import { getCompSet } from './comps/index.mjs'
 import { openSession } from './source/facebook/session.mjs'
 import { createFacebookSource } from './source/facebook/index.mjs'
@@ -48,14 +49,24 @@ function buildContext () {
  */
 async function openSoldClient (config, { headless = true } = {}) {
   if (process.env.FBAY_SOLD === 'fetch') {
-    return { sold: createSoldClient(), close: async () => {} }
+    return { sold: createSoldClient(), browse: null, close: async () => {} }
   }
   const session = await openEbaySession({ headless })
   return {
     sold: createBrowserSoldClient({ session, expectedCurrency: config.currency }),
+    // Same session also answers active-listing counts, so sell-through works
+    // whether or not the Browse API keyset has been approved.
+    browse: createBrowserBrowseClient({ session }),
     session,
     close: () => session.close(),
   }
+}
+
+/** Browse API when the keyset works, browser session otherwise. */
+async function pickBrowse (apiBrowse, browserBrowse) {
+  if (!browserBrowse) return apiBrowse
+  const tok = await apiBrowse.getToken()
+  return tok.ok ? apiBrowse : browserBrowse
 }
 
 const COMMANDS = {
@@ -70,14 +81,15 @@ const COMMANDS = {
     if (!env.ok) console.warn(`warning: missing ${env.missing.join(', ')} - active counts will be unavailable`)
 
     const { config, repo, browse } = buildContext()
-    const { sold, close } = await openSoldClient(config)
+    const { sold, browse: bBrowse, close } = await openSoldClient(config)
+    const browseClient = await pickBrowse(browse, bBrowse)
     const identity = {
       identityKey: `adhoc:${query.toLowerCase()}`,
       query,
       mustTokens: [],
       category: 'other',
     }
-    const r = await getCompSet({ identity, repo, sold, browse, config })
+    const r = await getCompSet({ identity, repo, sold, browse: browseClient, config })
     await close()
 
     if (!r.ok) {
@@ -248,12 +260,13 @@ const COMMANDS = {
 
     const llm = createLlm()
     const notifier = createTelegramNotifier()
-    const { sold, close } = await openSoldClient(config)
+    const { sold, browse: bBrowse, close } = await openSoldClient(config)
+    const browseClient = await pickBrowse(browse, bBrowse)
 
     for (const w of watches) {
       console.log(`\n[${w.name}] scanning...`)
       const r = await runWatch({
-        watch: w, source, repo, config, sold, browse, notifier, llm, limit,
+        watch: w, source, repo, config, sold, browse: browseClient, notifier, llm, limit,
         identifier: ({ listing }) => identify({ listing, repo, llm, config }),
         onProgress: ({ phase, done, total: t, index, total, listing, evaluation }) => {
           if (phase === 'detail') {
@@ -324,9 +337,10 @@ const COMMANDS = {
       ...detail,
     }
 
-    const { sold, close } = await openSoldClient(config)
+    const { sold, browse: bBrowse, close } = await openSoldClient(config)
+    const browseClient = await pickBrowse(browse, bBrowse)
     const ev = await evaluateListing({
-      listing, repo, config, sold, browse,
+      listing, repo, config, sold, browse: browseClient,
       identifier: ({ listing: l }) => identify({ listing: l, repo, llm, config }),
     })
     await close()
@@ -398,6 +412,49 @@ const COMMANDS = {
     console.log(`deal #${id} -> ${newStatus}`)
   },
 
+  async 'telegram-setup' () {
+    const token = process.env.TELEGRAM_BOT_TOKEN
+    if (!token) { console.error('\n  TELEGRAM_BOT_TOKEN is not set in .env\n'); process.exitCode = 1; return }
+
+    const me = await (await fetch(`https://api.telegram.org/bot${token}/getMe`)).json()
+    if (!me.ok) { console.error(`\n  bad bot token: ${me.description}\n`); process.exitCode = 1; return }
+
+    console.log(`\n  Bot: @${me.result.username}`)
+    console.log('  Open Telegram, message that bot anything (/start works), then wait here.\n')
+
+    // The chat id is the id of YOUR conversation with the bot, not the bot's
+    // own id. Using the number before the colon in the token is the classic
+    // mistake and produces "the bot can't send messages to the bot".
+    const botId = token.split(':')[0]
+    const deadline = Date.now() + 180000
+    let chat = null
+    while (Date.now() < deadline && !chat) {
+      const j = await (await fetch(`https://api.telegram.org/bot${token}/getUpdates`)).json()
+      for (const u of j.result ?? []) {
+        const m = u.message ?? u.edited_message ?? u.channel_post
+        if (m?.chat && String(m.chat.id) !== botId) { chat = m.chat; break }
+      }
+      if (!chat) await new Promise((r) => setTimeout(r, 2000))
+    }
+
+    if (!chat) { console.error('  No message received in 3 minutes. Run `fbay telegram-setup` again.\n'); process.exitCode = 1; return }
+
+    const name = chat.username ? `@${chat.username}` : (chat.first_name ?? chat.title ?? chat.type)
+    console.log(`  Found chat ${chat.id} (${name})`)
+
+    const envPath = path.join(process.cwd(), '.env')
+    let env = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : ''
+    env = /^TELEGRAM_CHAT_ID=.*$/m.test(env)
+      ? env.replace(/^TELEGRAM_CHAT_ID=.*$/m, `TELEGRAM_CHAT_ID=${chat.id}`)
+      : `${env.trimEnd()}\nTELEGRAM_CHAT_ID=${chat.id}\n`
+    fs.writeFileSync(envPath, env)
+    console.log('  Saved to .env')
+
+    process.env.TELEGRAM_CHAT_ID = String(chat.id)
+    const r = await createTelegramNotifier().notifyAlert('Telegram is wired up. Deal cards will arrive here.')
+    console.log(r.ok ? '  Test message sent - check Telegram.\n' : `  Saved, but the test send failed: ${r.error}\n`)
+  },
+
   async doctor () {
     const checks = []
     const { config, repo, browse } = buildContext()
@@ -428,7 +485,11 @@ const COMMANDS = {
     checks.push({ check: 'database', ok: true, detail: JSON.stringify(repo.stats()) })
 
     const tok = await withTimeout('ebay oauth', 20000, () => browse.getToken())
-    checks.push({ check: 'ebay oauth', ok: tok.ok === true, detail: tok.__error ?? (tok.ok ? 'token acquired' : tok.error) })
+    checks.push({
+      check: 'ebay browse api',
+      ok: true,
+      detail: tok.ok === true ? 'token acquired' : `unavailable (${tok.__error ?? tok.error}) - falling back to the browser session`,
+    })
 
     const notifier = createTelegramNotifier()
     checks.push({ check: 'telegram', ok: notifier.configured, detail: notifier.configured ? 'configured' : 'TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID missing' })
@@ -487,7 +548,8 @@ const COMMANDS = {
     const { config, repo, browse } = buildContext()
     const llm = createLlm()
     const notifier = createTelegramNotifier()
-    const { sold, close } = await openSoldClient(config)
+    const { sold, browse: bBrowse, close } = await openSoldClient(config)
+    const browseClient = await pickBrowse(browse, bBrowse)
 
     const canaries = await runAllCanaries({ sold, repo, notifier, expectedCurrency: config.currency })
     if (!canaries.ok) console.warn('warning: canary failures detected, see fbay doctor')
@@ -508,7 +570,7 @@ const COMMANDS = {
       config,
       notifier,
       runOne: (watch) => runWatch({
-        watch, source, repo, config, sold, browse, notifier,
+        watch, source, repo, config, sold, browse: browseClient, notifier,
         identifier: ({ listing }) => identify({ listing, repo, llm, config }),
       }),
     })
@@ -533,6 +595,7 @@ const HELP = `fbay - Facebook Marketplace to eBay arbitrage
 setup
   fbay login                    log into Facebook once (opens a browser)
   fbay ebay-login               sign into eBay once (sold listings need it)
+  fbay telegram-setup           link your Telegram chat for alerts
   fbay doctor                   check every dependency
 
 daily

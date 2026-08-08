@@ -2,6 +2,7 @@ import path from 'node:path'
 import { chromium } from 'playwright'
 import { parseSoldHtml, soldSearchUrl, detectGate } from './ebay-sold.mjs'
 
+
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
 
 /**
@@ -103,4 +104,50 @@ export function createBrowserSoldClient ({ session, expectedCurrency = 'USD', wa
   }
 
   return { fetchSold }
+}
+
+/**
+ * Active-listing count, read from a normal eBay search page.
+ *
+ * The Browse API is the "proper" source, but a production keyset needs eBay's
+ * approval and the count is the only thing we use it for. Without a count,
+ * sell-through is unknown and every deal is held - which makes the whole
+ * system inert. An ordinary search page is not gated behind sign-in and states
+ * the total directly ("11,000 + results"), so read it there.
+ */
+const RESULT_COUNT_RE = /([\d,]+)\s*\+?\s*results?/i
+
+export function parseActiveCount (html) {
+  if (!html) return null
+  const text = String(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+  const m = text.match(RESULT_COUNT_RE)
+  if (!m) return null
+  const n = Number(m[1].replace(/,/g, ''))
+  return Number.isFinite(n) ? n : null
+}
+
+export function activeSearchUrl (query, { perPage = 60 } = {}) {
+  return `https://www.ebay.com/sch/i.html?${new URLSearchParams({ _nkw: query, _ipg: String(perPage) })}`
+}
+
+/** Satisfies the same {searchActive} interface as the Browse API client. */
+export function createBrowserBrowseClient ({ session, warmUp = true }) {
+  let warmed = false
+
+  async function searchActive (query) {
+    if (warmUp && !warmed) {
+      await session.fetchHtml('https://www.ebay.com/', { waitMs: 1200 })
+      warmed = true
+    }
+    const { html, title, status } = await session.fetchHtml(activeSearchUrl(query), { waitMs: 3500 })
+    const gate = detectGate(html, title)
+    if (gate.gated) return { ok: false, error: gate.reason, gated: true }
+    if (status >= 400) return { ok: false, error: `eBay returned ${status}` }
+
+    const total = parseActiveCount(html)
+    if (total == null) return { ok: false, error: 'could not read the active-listing count from the search page' }
+    return { ok: true, total, items: [] }
+  }
+
+  return { provider: 'browser', searchActive, getToken: async () => ({ ok: true, token: 'browser-session' }) }
 }

@@ -1,0 +1,55 @@
+{
+  "_comment": "Tuned for ~$500 of working capital. The binding constraint is not margin, it is how long cash stays tied up in an item that has not sold.",
+
+  "thresholds": {
+    "_comment": "maxAskCents caps a single buy at $120 so no one item can take more than a quarter of the float. minRoi is high because with small capital, percentage return per turn matters far more than absolute profit: $40 on a $60 buy beats $60 on a $300 buy, because the first one can be run four times.",
+    "maxAskCents": 12000,
+    "minNetProfitCents": 2500,
+    "minRoi": 0.6,
+    "minSellThrough": 0.35,
+    "minCompSampleSize": 8,
+    "minIdentityConfidence": 0.7
+  },
+
+  "economics": {
+    "_comment": "A wider buffer than the 5% default. One bad unit hurts far more when the float is $500, and the buffer is what absorbs a return, a scuff missed in the photos, or a shipping surprise.",
+    "bufferRate": 0.08,
+    "promotedRate": 0
+  },
+
+  "weights": {
+    "_comment": "Velocity is weighted above raw profit. Capital that turns over twice a month at 60% beats capital that turns once a quarter at 120%.",
+    "profit": 0.2,
+    "roi": 0.3,
+    "velocity": 0.3,
+    "confidence": 0.15,
+    "age": 0.05,
+    "drop": 0.1
+  },
+
+  "freight": {
+    "_comment": "Off. Freight items are the classic way to lose a whole float on one sofa.",
+    "enabled": false
+  },
+
+  "pace": {
+    "_comment": "Deliberately modest. A slow monitor that keeps the Facebook account alive is worth more than a fast one that gets checkpointed.",
+    "maxListingsPerDay": 250,
+    "maxRequestsPerHour": 60,
+    "minDelayMs": 2500,
+    "maxDelayMs": 9000,
+    "detailFetchRatio": 0.5
+  },
+
+  "quietHours": { "start": 23, "end": 7 },
+
+  "blacklist": {
+    "keywords": [
+      "broken", "as is", "for parts", "no returns", "scam",
+      "box only", "empty box", "case only", "read description",
+      "cracked", "water damage", "no power", "locked", "icloud",
+      "activation lock", "bad esn", "blacklisted", "financed"
+    ],
+    "sellers": []
+  }
+}
