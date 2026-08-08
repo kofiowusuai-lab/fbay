@@ -54,10 +54,26 @@ export async function openEbaySession ({
       return !/signin|sign in or register|security measure/i.test(`${url} ${title}`)
     },
 
-    async fetchHtml (url, { waitMs = 3500 } = {}) {
-      const res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 })
-      await page.waitForTimeout(waitMs)
-      return { status: res?.status() ?? 0, html: await page.content(), title: await page.title() }
+    /**
+     * Never throws, for the same reason the Facebook session does not: a single
+     * slow eBay page must not end an unattended run. This path is hit by the
+     * startup canaries too, so an exception here killed the monitor before it
+     * scanned anything.
+     */
+    async fetchHtml (url, { waitMs = 3500, timeout = 60000 } = {}) {
+      try {
+        const res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
+        await page.waitForTimeout(waitMs)
+        return { ok: true, status: res?.status() ?? 0, html: await page.content(), title: await page.title() }
+      } catch (e) {
+        return {
+          ok: false,
+          status: 0,
+          html: '',
+          title: '',
+          error: `navigation failed: ${String(e.message ?? e).split('\n')[0].slice(0, 120)}`,
+        }
+      }
     },
   }
 }
@@ -79,7 +95,8 @@ export function createBrowserSoldClient ({ session, expectedCurrency = 'USD', ma
       warmed = true
     }
 
-    const { status, html, title } = await session.fetchHtml(url)
+    const { ok, status, html, title, error } = await session.fetchHtml(url)
+    if (ok === false) return { ok: false, error, url, status: 0 }
 
     const gate = detectGate(html, title)
     if (gate.gated) return { ok: false, error: gate.reason, gated: true, url, status }
@@ -143,7 +160,8 @@ export function createBrowserBrowseClient ({ session, marketplace = 'EBAY_US', w
       await session.fetchHtml(`https://${ebayDomain(marketplace)}/`, { waitMs: 1200 })
       warmed = true
     }
-    const { html, title, status } = await session.fetchHtml(activeSearchUrl(query, { marketplace }), { waitMs: 3500 })
+    const { ok, html, title, status, error } = await session.fetchHtml(activeSearchUrl(query, { marketplace }), { waitMs: 3500 })
+    if (ok === false) return { ok: false, error }
     const gate = detectGate(html, title)
     if (gate.gated) return { ok: false, error: gate.reason, gated: true }
     if (status >= 400) return { ok: false, error: `eBay returned ${status}` }

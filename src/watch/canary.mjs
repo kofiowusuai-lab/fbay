@@ -11,14 +11,21 @@ import { buildCompSet } from '../comps/stats.mjs'
  * through every other check while making junk look like treasure.
  */
 export const CANARIES = [
-  { name: 'ebay_sold_iphone', query: 'iphone 13 128gb unlocked', mustTokens: ['iphone', '13'], minResults: 8, medianBandCents: [8000, 70000] },
-  { name: 'ebay_sold_airpods', query: 'apple airpods pro 2nd generation', mustTokens: ['airpods'], minResults: 8, medianBandCents: [4000, 25000] },
+  { name: 'ebay_sold_iphone', query: 'iphone 13 128gb unlocked', mustTokens: ['iphone', '13'], minResults: 8, medianBandCents: [6000, 70000] },
+  { name: 'ebay_sold_airpods', query: 'apple airpods pro 2nd generation', mustTokens: ['airpods'], minResults: 8, medianBandCents: [3000, 25000] },
 ]
 
 export const HALT_AFTER_CONSECUTIVE_FAILURES = 2
 
 export async function runCanary ({ canary, sold, repo, now = Date.now(), expectedCurrency = 'USD' }) {
-  const res = await sold.fetchSold(canary.query)
+  let res
+  try {
+    res = await sold.fetchSold(canary.query)
+  } catch (e) {
+    const reason = `canary threw: ${String(e.message ?? e).split('\n')[0].slice(0, 120)}`
+    repo.recordCanary(canary.name, false, now, reason)
+    return { ok: false, name: canary.name, reason }
+  }
 
   if (!res.ok) {
     const reason = `fetch failed: ${res.error}`

@@ -67,3 +67,15 @@ test('runAllCanaries alerts once with a combined message', async () => {
   assert.equal(alerts.length, 1)
   assert.match(alerts[0], /canary/i)
 })
+
+test('a throwing sold client fails the canary instead of killing the run', async () => {
+  // Canaries run at monitor startup, so an exception here killed the monitor
+  // before it scanned anything at all.
+  const repo = createRepo(openDb(':memory:'))
+  const sold = { fetchSold: async () => { throw new Error('page.goto: Timeout 60000ms exceeded') } }
+  const r = await runCanary({ canary: CANARY, sold, repo, now: 100 })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /threw/)
+  assert.match(r.reason, /Timeout/)
+  assert.equal(repo.getCanary(CANARY.name).consecutive_failures, 1)
+})
