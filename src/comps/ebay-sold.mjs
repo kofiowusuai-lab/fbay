@@ -102,9 +102,22 @@ export function parseSoldDate (text) {
   return Date.UTC(Number(m[3]), month, Number(m[2]))
 }
 
-export function soldSearchUrl (query, { perPage = 240 } = {}) {
+/** eBay runs a separate site per marketplace; sold comps must come from the one you will actually sell on. */
+export const EBAY_DOMAINS = {
+  EBAY_US: 'www.ebay.com',
+  EBAY_GB: 'www.ebay.co.uk',
+  EBAY_DE: 'www.ebay.de',
+  EBAY_AU: 'www.ebay.com.au',
+  EBAY_CA: 'www.ebay.ca',
+}
+
+export function ebayDomain (marketplace = 'EBAY_US') {
+  return EBAY_DOMAINS[marketplace] ?? EBAY_DOMAINS.EBAY_US
+}
+
+export function soldSearchUrl (query, { perPage = 240, marketplace = 'EBAY_US' } = {}) {
   const p = new URLSearchParams({ _nkw: query, LH_Sold: '1', LH_Complete: '1', _ipg: String(perPage) })
-  return `https://www.ebay.com/sch/i.html?${p}`
+  return `https://${ebayDomain(marketplace)}/sch/i.html?${p}`
 }
 
 function extractItemId (href) {
@@ -189,11 +202,12 @@ export function detectGate (html, title = '') {
 
 export function createSoldClient ({
   fetchImpl = globalThis.fetch,
+  marketplace = 'EBAY_US',
   retries = 2,
   sleepImpl = (ms) => new Promise((r) => setTimeout(r, ms)),
 } = {}) {
   async function fetchSold (query, opts = {}) {
-    const url = soldSearchUrl(query, opts)
+    const url = soldSearchUrl(query, { marketplace, ...opts })
     let lastError = null
     for (let attempt = 0; attempt <= retries; attempt++) {
       const res = await fetchImpl(url, {

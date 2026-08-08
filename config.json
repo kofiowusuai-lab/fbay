@@ -1,10 +1,13 @@
 {
-  "_comment": "Tuned for ~$500 of working capital. The binding constraint is not margin, it is how long cash stays tied up in an item that has not sold.",
+  "_comment": "UK operator. Tuned for ~\u00a3400 of working capital. The binding constraint is not margin, it is how long cash stays tied up in an item that has not sold.",
+
+  "currency": "GBP",
+  "marketplace": "EBAY_GB",
 
   "thresholds": {
-    "_comment": "maxAskCents caps a single buy at $120 so no one item can take more than a quarter of the float. minRoi is high because with small capital, percentage return per turn matters far more than absolute profit: $40 on a $60 buy beats $60 on a $300 buy, because the first one can be run four times.",
-    "maxAskCents": 12000,
-    "minNetProfitCents": 2500,
+    "_comment": "maxAskCents caps a single buy at \u00a3100 so no one item can take more than a quarter of the float. minRoi is high because with small capital, percentage return per turn matters far more than absolute profit: $40 on a $60 buy beats $60 on a $300 buy, because the first one can be run four times.",
+    "maxAskCents": 10000,
+    "minNetProfitCents": 2000,
     "minRoi": 0.6,
     "minSellThrough": 0.35,
     "minCompSampleSize": 8,
@@ -12,6 +15,7 @@
   },
 
   "economics": {
+    "sellerType": "private",
     "_comment": "A wider buffer than the 5% default. One bad unit hurts far more when the float is $500, and the buffer is what absorbs a return, a scuff missed in the photos, or a shipping surprise.",
     "bufferRate": 0.08,
     "promotedRate": 0

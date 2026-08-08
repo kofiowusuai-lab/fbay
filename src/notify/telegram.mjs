@@ -14,8 +14,10 @@ export function link (url, text) {
   return `<a href="${escapeHtml(url)}">${escapeHtml(text)}</a>`
 }
 
-function money (cents) {
-  return cents == null ? 'n/a' : `$${(cents / 100).toFixed(2)}`
+const SYMBOLS = { USD: '$', GBP: '\u00A3', EUR: '\u20AC', CAD: 'C$', AUD: 'A$' }
+
+function money (cents, currency = 'USD') {
+  return cents == null ? 'n/a' : `${SYMBOLS[currency] ?? '$'}${(cents / 100).toFixed(2)}`
 }
 
 function pct (x) {
@@ -41,7 +43,8 @@ export function pickEvidence (comps = [], medianCents, n = 3) {
     .sort((a, b) => b.price_cents - a.price_cents)
 }
 
-export function formatDealCard ({ listing, identity, compset, profit, score, priceDrop, comps = [], nearMiss = null }) {
+export function formatDealCard ({ listing, identity, compset, profit, score, priceDrop, comps = [], nearMiss = null, currency = 'USD', marketplace = 'EBAY_US' }) {
+  const m = (c) => money(c, currency)
   const name = [identity.brand, identity.model, identity.variant, identity.capacity].filter(Boolean).join(' ')
   const out = []
 
@@ -50,31 +53,31 @@ export function formatDealCard ({ listing, identity, compset, profit, score, pri
   out.push(escapeHtml(`${identity.condition} · ${identity.category} · ${pct(identity.identityConfidence)} sure`))
   out.push('')
 
-  if (priceDrop) out.push(escapeHtml(`Price dropped from ${money(priceDrop.previousPriceCents)}`), '')
+  if (priceDrop) out.push(escapeHtml(`Price dropped from ${m(priceDrop.previousPriceCents)}`), '')
 
-  out.push(`<b>OFFER UP TO ${escapeHtml(money(profit.breakevenBuyCents))}</b>`)
-  out.push(escapeHtml(`They are asking ${money(listing.priceCents)} · net ${money(profit.netCents)} · ROI ${pct(profit.roi)}`))
+  out.push(`<b>OFFER UP TO ${escapeHtml(m(profit.breakevenBuyCents))}</b>`)
+  out.push(escapeHtml(`They are asking ${m(listing.priceCents)} · net ${m(profit.netCents)} · ROI ${pct(profit.roi)}`))
   out.push('')
 
-  out.push(`<b>Sell on eBay around ${escapeHtml(money(compset.trimmedMedianCents))}</b>`)
-  out.push(escapeHtml(`Range ${money(compset.p25Cents)}-${money(compset.p75Cents)} from ${compset.sampleN} sold`))
+  out.push(`<b>Sell on eBay around ${escapeHtml(m(compset.trimmedMedianCents))}</b>`)
+  out.push(escapeHtml(`Range ${m(compset.p25Cents)}-${m(compset.p75Cents)} from ${compset.sampleN} sold`))
   out.push(escapeHtml(`Sell-through ${pct(compset.sellThrough)} · ${compset.activeCount} listed now`))
 
   const evidence = pickEvidence(comps, compset.trimmedMedianCents)
   if (evidence.length) {
     out.push('', '<b>Recently sold:</b>')
     for (const c of evidence) {
-      out.push(`• ${link(c.url, `${money(c.price_cents)} — ${String(c.title).slice(0, 52)}`)}${escapeHtml(soldDate(c.sold_at))}`)
+      out.push(`• ${link(c.url, `${m(c.price_cents)} — ${String(c.title).slice(0, 52)}`)}${escapeHtml(soldDate(c.sold_at))}`)
     }
   }
 
   out.push('')
-  out.push(escapeHtml(`Fees ${money(profit.fvfCents + profit.perOrderCents + profit.promotedCents)} · ship ${money(profit.shippingCents)} · buffer ${money(profit.bufferCents)}`))
+  out.push(escapeHtml(`Fees ${m(profit.fvfCents + profit.perOrderCents + profit.promotedCents)} · ship ${m(profit.shippingCents)} · buffer ${m(profit.bufferCents)}`))
   if (listing.city) out.push(escapeHtml(listing.city))
 
   out.push('')
   out.push(link(listing.url, '➜ BUY ON FACEBOOK'))
-  if (identity.query) out.push(link(soldSearchUrl(identity.query), 'see all sold on eBay'))
+  if (identity.query) out.push(link(soldSearchUrl(identity.query, { marketplace }), 'see all sold on eBay'))
 
   return out.join('\n')
 }

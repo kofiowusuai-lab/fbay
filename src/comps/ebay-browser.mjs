@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { chromium } from 'playwright'
-import { parseSoldHtml, soldSearchUrl, detectGate } from './ebay-sold.mjs'
+import { parseSoldHtml, soldSearchUrl, detectGate, ebayDomain } from './ebay-sold.mjs'
 
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
@@ -18,7 +18,9 @@ export async function openEbaySession ({
   profileDir = process.env.FBAY_EBAY_PROFILE_DIR || './ebay-profile',
   headless = true,
   browserType = chromium,
+  marketplace = 'EBAY_US',
 } = {}) {
+  const domain = ebayDomain(marketplace)
   const context = await browserType.launchPersistentContext(path.resolve(profileDir), {
     headless,
     userAgent: UA,
@@ -42,8 +44,10 @@ export async function openEbaySession ({
      * This loads a page that requires authentication and sees whether eBay
      * keeps us there or bounces us to the sign-in flow.
      */
+    domain,
+
     async isSignedIn () {
-      await page.goto('https://www.ebay.com/mye/myebay/summary', { waitUntil: 'domcontentloaded', timeout: 45000 })
+      await page.goto(`https://${domain}/mye/myebay/summary`, { waitUntil: 'domcontentloaded', timeout: 45000 })
       await page.waitForTimeout(2000)
       const url = page.url()
       const title = await page.title()
@@ -62,16 +66,16 @@ export async function openEbaySession ({
  * Satisfies the same {fetchSold(query)} interface as createSoldClient, so
  * comps/index.mjs is unchanged. Takes an already-open session.
  */
-export function createBrowserSoldClient ({ session, expectedCurrency = 'USD', warmUp = true }) {
+export function createBrowserSoldClient ({ session, expectedCurrency = 'USD', marketplace = 'EBAY_US', warmUp = true }) {
   let warmed = false
 
   async function fetchSold (query, opts = {}) {
-    const url = soldSearchUrl(query, opts)
+    const url = soldSearchUrl(query, { marketplace, ...opts })
 
     // A cold context hitting /sch directly reads as a bot. One homepage visit
     // establishes the session cookies eBay expects.
     if (warmUp && !warmed) {
-      await session.fetchHtml('https://www.ebay.com/', { waitMs: 1500 })
+      await session.fetchHtml(`https://${ebayDomain(marketplace)}/`, { waitMs: 1500 })
       warmed = true
     }
 
@@ -126,20 +130,20 @@ export function parseActiveCount (html) {
   return Number.isFinite(n) ? n : null
 }
 
-export function activeSearchUrl (query, { perPage = 60 } = {}) {
-  return `https://www.ebay.com/sch/i.html?${new URLSearchParams({ _nkw: query, _ipg: String(perPage) })}`
+export function activeSearchUrl (query, { perPage = 60, marketplace = 'EBAY_US' } = {}) {
+  return `https://${ebayDomain(marketplace)}/sch/i.html?${new URLSearchParams({ _nkw: query, _ipg: String(perPage) })}`
 }
 
 /** Satisfies the same {searchActive} interface as the Browse API client. */
-export function createBrowserBrowseClient ({ session, warmUp = true }) {
+export function createBrowserBrowseClient ({ session, marketplace = 'EBAY_US', warmUp = true }) {
   let warmed = false
 
   async function searchActive (query) {
     if (warmUp && !warmed) {
-      await session.fetchHtml('https://www.ebay.com/', { waitMs: 1200 })
+      await session.fetchHtml(`https://${ebayDomain(marketplace)}/`, { waitMs: 1200 })
       warmed = true
     }
-    const { html, title, status } = await session.fetchHtml(activeSearchUrl(query), { waitMs: 3500 })
+    const { html, title, status } = await session.fetchHtml(activeSearchUrl(query, { marketplace }), { waitMs: 3500 })
     const gate = detectGate(html, title)
     if (gate.gated) return { ok: false, error: gate.reason, gated: true }
     if (status >= 400) return { ok: false, error: `eBay returned ${status}` }

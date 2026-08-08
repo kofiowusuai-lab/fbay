@@ -6,9 +6,10 @@ import { shippingFor } from './shipping.mjs'
  * because a parcel estimate would be a lie, and a lie here loses real money.
  */
 export function computeProfit ({ grossCents, askCents, category, config, weightLb, localResale = false }) {
-  const { promotedRate, bufferRate } = config.economics
-  const fees = computeFees({ grossCents, category, promotedRate })
-  const ship = shippingFor({ category, weightLb, localResale })
+  const { promotedRate, bufferRate, sellerType } = config.economics
+  const marketplace = config.marketplace ?? 'EBAY_US'
+  const fees = computeFees({ grossCents, category, promotedRate, marketplace, sellerType })
+  const ship = shippingFor({ category, weightLb, localResale, marketplace })
   const bufferCents = Math.round(grossCents * bufferRate)
 
   const base = {
@@ -16,12 +17,14 @@ export function computeProfit ({ grossCents, askCents, category, config, weightL
     askCents,
     category,
     rate: fees.rate,
+    feeRegime: fees.regime,
     fvfCents: fees.fvfCents,
     perOrderCents: fees.perOrderCents,
     promotedCents: fees.promotedCents,
     bufferCents,
     shippingCents: ship.costCents,
     weightLb: ship.weightLb,
+    weightKg: ship.weightKg ?? null,
     shippingBand: ship.band.key,
     freight: ship.freight,
     localResale: ship.localResale,

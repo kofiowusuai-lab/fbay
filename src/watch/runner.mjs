@@ -134,6 +134,7 @@ export async function runWatch ({
       await notifier.notifyNearMiss?.({
         listing, identity: ev.identity, compset: ev.compset,
         profit: ev.profit, score: ev.score, rejections: ev.rejections, comps,
+        currency: config.currency, marketplace: config.marketplace,
       })
     }
 
@@ -146,6 +147,7 @@ export async function runWatch ({
       await notifier.notifyDeal({
         listing, identity: ev.identity, compset: ev.compset,
         profit: ev.profit, score: ev.score, priceDrop, comps,
+        currency: config.currency, marketplace: config.marketplace,
       })
     }
   }

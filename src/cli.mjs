@@ -22,9 +22,13 @@ import { createTelegramNotifier } from './notify/telegram.mjs'
 import { runAllCanaries, scanningShouldHalt } from './watch/canary.mjs'
 import { runLoop } from './watch/schedule.mjs'
 
+const CURRENCY_SYMBOLS = { USD: '$', GBP: '\u00A3', EUR: '\u20AC', CAD: 'C$', AUD: 'A$' }
+let currencySymbol = '$'
+export function setCurrency (code) { currencySymbol = CURRENCY_SYMBOLS[code] ?? '$' }
+
 export function money (cents) {
   if (cents == null) return 'n/a'
-  return `$${(cents / 100).toFixed(2)}`
+  return `${currencySymbol}${(cents / 100).toFixed(2)}`
 }
 
 export function pct (x) {
@@ -33,6 +37,7 @@ export function pct (x) {
 
 function buildContext () {
   const config = loadConfig()
+  setCurrency(config.currency)
   const repo = createRepo(openDb())
   const browse = createBrowseClient({
     appId: process.env.EBAY_APP_ID,
@@ -49,14 +54,14 @@ function buildContext () {
  */
 async function openSoldClient (config, { headless = true } = {}) {
   if (process.env.FBAY_SOLD === 'fetch') {
-    return { sold: createSoldClient(), browse: null, close: async () => {} }
+    return { sold: createSoldClient({ marketplace: config.marketplace }), browse: null, close: async () => {} }
   }
-  const session = await openEbaySession({ headless })
+  const session = await openEbaySession({ headless, marketplace: config.marketplace })
   return {
-    sold: createBrowserSoldClient({ session, expectedCurrency: config.currency }),
+    sold: createBrowserSoldClient({ session, expectedCurrency: config.currency, marketplace: config.marketplace }),
     // Same session also answers active-listing counts, so sell-through works
     // whether or not the Browse API keyset has been approved.
-    browse: createBrowserBrowseClient({ session }),
+    browse: createBrowserBrowseClient({ session, marketplace: config.marketplace }),
     session,
     close: () => session.close(),
   }
@@ -145,12 +150,13 @@ const COMMANDS = {
   },
 
   async 'ebay-login' () {
-    console.log('\n  Opening a dedicated browser for FBay (separate from your normal Chrome).')
-    console.log('  Sign into an account on the marketplace you want prices from:')
-    console.log('  eBay picks display currency from your account and exit IP.\n')
+    const config = loadConfig()
+    const session = await openEbaySession({ headless: false, marketplace: config.marketplace })
+    console.log(`\n  Opening a dedicated browser for FBay (separate from your normal Chrome).`)
+    console.log(`  Signing into ${session.domain} for ${config.marketplace} (${config.currency}).`)
+    console.log('  eBay sessions are per-site, so a .com login does not authorise .co.uk.\n')
 
-    const session = await openEbaySession({ headless: false })
-    await session.page.goto('https://www.ebay.com/signin/', { waitUntil: 'domcontentloaded' }).catch(() => {})
+    await session.page.goto(`https://${session.domain}/signin/`, { waitUntil: 'domcontentloaded' }).catch(() => {})
 
     const deadline = Date.now() + 300000
     let ok = false
