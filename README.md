@@ -18,7 +18,12 @@ For every listing it finds:
 cd ~/fbay
 npm install
 cp .env.example .env
+ln -sf ~/fbay/fbay ~/bin/fbay   # so `fbay` works from any directory
 ```
+
+> The launcher lives at `~/fbay/fbay`, inside a folder of the same name. Running
+> `./fbay` from your home directory hits the *folder* and fails with "permission
+> denied". The symlink above avoids that entirely — after it, just type `fbay`.
 
 Fill in `.env`:
 
@@ -31,9 +36,9 @@ Fill in `.env`:
 Then log into both sites once. A browser opens, you log in, the session persists:
 
 ```bash
-./fbay login          # Facebook
-./fbay ebay-login     # eBay
-./fbay doctor
+fbay login          # Facebook
+fbay ebay-login     # eBay
+fbay doctor
 ```
 
 `doctor` must be all green before you run anything else. Every failing row names its own fix.
@@ -48,27 +53,27 @@ Signing in also pins your marketplace. **This matters more than it sounds.** eBa
 
 ```bash
 # Paste any Marketplace link, get a verdict
-./fbay price "https://www.facebook.com/marketplace/item/123456789/"
+fbay price "https://www.facebook.com/marketplace/item/123456789/"
 
 # What does this sell for, and how fast
-./fbay comps "dewalt dcd791 20v drill"
+fbay comps "dewalt dcd791 20v drill"
 
 # Saved searches
-./fbay watch add --name macbooks --city nyc --query "macbook pro" --max 900 --radius 40
-./fbay watch list
+fbay watch add --name macbooks --city nyc --query "macbook pro" --max 900 --radius 40
+fbay watch list
 
 # One pass now
-./fbay scan --watch macbooks
-./fbay scan --dry            # list what it sees, write nothing
+fbay scan --watch macbooks
+fbay scan --dry            # list what it sees, write nothing
 
 # Run continuously, alerting to Telegram
-./fbay run
+fbay run
 
 # Review
-./fbay deals
-./fbay deals --status needs_review
-./fbay message 42            # draft the seller offer
-./fbay status 42 pursuing
+fbay deals
+fbay deals --status needs_review
+fbay message 42            # draft the seller offer
+fbay status 42 pursuing
 ```
 
 Dashboard:

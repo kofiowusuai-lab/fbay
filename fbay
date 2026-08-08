@@ -1,4 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")"
+
+# Resolve through symlinks so `fbay` works when linked onto PATH (e.g.
+# ~/bin/fbay -> ~/fbay/fbay). Using dirname on the invocation path alone
+# would resolve to ~/bin and fail to find src/. macOS ships BSD readlink,
+# which has no -f, so walk the links manually.
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
+cd "$DIR"
 exec node src/cli.mjs "$@"
