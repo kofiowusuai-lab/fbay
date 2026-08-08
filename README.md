@@ -96,8 +96,11 @@ because it then values the item against an entirely wrong set of comps.
 |---|---|---|
 | Anthropic (Haiku 4.5) | yes | Default. Escalates once to Opus 5 on low confidence. |
 | OpenAI (gpt-5-mini) | yes | Set `OPENAI_API_KEY`. Escalates to gpt-5. |
+| Codex CLI | yes | Uses your **ChatGPT subscription**, no metered API credits. ~20s per listing vs ~3s, so it suits ad-hoc `fbay price` far better than bulk `fbay run`. Force with `FBAY_LLM_PROVIDER=codex`. |
 | DeepSeek | **no** | The public API is text-only, including V4 Pro/Flash. Vision exists in their web chat only. |
 | Local (Ollama) | not wired | Would work with a vision model such as Qwen2.5-VL; `src/llm-openai.mjs` is the template. |
+
+Selection order is Anthropic, then OpenAI, then Codex: the metered APIs come first because Codex spawns a whole agent process per call. Override with `FBAY_LLM_PROVIDER`.
 
 Adding a provider means one new file satisfying `{extractStructured, completeText}`
 and one line in `createLlm()`. Nothing else in the codebase knows which provider

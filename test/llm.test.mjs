@@ -108,11 +108,43 @@ test('detectAuth recognises an ant auth login OAuth profile', () => {
   assert.equal(r.mode, 'oauth_profile')
 })
 
-test('detectAuth reports both remedies when nothing is configured', () => {
-  const r = detectAuth({ HOME: '/home/me' }, { existsSync: () => false })
+test('detectAuth reports every remedy when nothing is configured', () => {
+  // fs is injected so the check cannot pick up real credentials on the machine.
+  const noCreds = { existsSync: () => false, readFileSync: () => { throw new Error('ENOENT') } }
+  const r = detectAuth({ HOME: '/home/me' }, noCreds)
   assert.equal(r.ok, false)
+  assert.equal(r.provider, null)
   assert.match(r.detail, /ANTHROPIC_API_KEY/)
+  assert.match(r.detail, /OPENAI_API_KEY/)
   assert.match(r.detail, /ant auth login/)
+  assert.match(r.detail, /codex login/)
+})
+
+// Path-aware fake: codex authenticated, no anthropic oauth profile on disk.
+const codexOnlyFs = {
+  existsSync: (p) => String(p).includes('.codex'),
+  readFileSync: (p) => {
+    if (String(p).includes('.codex')) return JSON.stringify({ auth_mode: 'chatgpt', tokens: { a: 1 } })
+    throw new Error('ENOENT')
+  },
+}
+
+test('codex is selected when it is the only credential available', () => {
+  const r = detectAuth({ HOME: '/home/me' }, codexOnlyFs)
+  assert.equal(r.provider, 'codex')
+  assert.equal(r.mode, 'subscription')
+  assert.match(r.detail, /no API credits/)
+})
+
+test('an API provider is preferred over codex when both exist', () => {
+  // Codex works but costs 5x the latency, so a metered key should win.
+  assert.equal(detectAuth({ ANTHROPIC_API_KEY: 'k', HOME: '/h' }, codexOnlyFs).provider, 'anthropic')
+  assert.equal(detectAuth({ OPENAI_API_KEY: 'k', HOME: '/h' }, codexOnlyFs).provider, 'openai')
+})
+
+test('FBAY_LLM_PROVIDER=codex overrides an available API key', () => {
+  const r = detectAuth({ OPENAI_API_KEY: 'k', HOME: '/h', FBAY_LLM_PROVIDER: 'codex' }, codexOnlyFs)
+  assert.equal(r.provider, 'codex')
 })
 
 test('the client does not pass an explicit undefined apiKey, which would break the profile path', () => {

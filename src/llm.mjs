@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { createOpenAiLlmClient } from './llm-openai.mjs'
+import { createCodexLlmClient, isAvailable as codexAvailable } from './llm-codex.mjs'
 
 export const MODELS = {
   fast: 'claude-haiku-4-5-20251001',
@@ -30,8 +31,19 @@ export function detectAuth (env = process.env, fs = null) {
     }
   }
 
-  if (forced !== 'anthropic' && env.OPENAI_API_KEY) {
+  if (forced !== 'anthropic' && forced !== 'codex' && env.OPENAI_API_KEY) {
     return { ok: true, provider: 'openai', mode: 'api_key', detail: 'openai: OPENAI_API_KEY' }
+  }
+
+  // Codex is last by preference, not by capability: it is 5x slower per call
+  // because a whole agent process starts each time. It is the only option that
+  // needs no metered credit, so it stays as the fallback.
+  if (forced !== 'anthropic' && forced !== 'openai') {
+    // Honour the injected fs so callers (and tests) can isolate this check
+    // instead of reading whatever happens to be on the real machine.
+    const codex = fs ? codexAvailable({ homedir: env.HOME ?? '', fsImpl: fs }) : codexAvailable()
+    if (codex.ok) return { ok: true, provider: 'codex', mode: codex.mode, detail: codex.detail }
+    if (forced === 'codex') return { ok: false, provider: 'codex', mode: null, detail: codex.detail }
   }
 
   if (forced) return { ok: false, provider: forced, mode: null, detail: `FBAY_LLM_PROVIDER=${forced} but no credential for it` }
@@ -40,7 +52,7 @@ export function detectAuth (env = process.env, fs = null) {
     ok: false,
     provider: null,
     mode: null,
-    detail: 'no credential: set ANTHROPIC_API_KEY or OPENAI_API_KEY (or run `ant auth login`)',
+    detail: 'no credential: set ANTHROPIC_API_KEY or OPENAI_API_KEY, run `ant auth login`, or `codex login`',
   }
 }
 
@@ -54,6 +66,7 @@ export function detectAuth (env = process.env, fs = null) {
 export function createLlm (opts = {}) {
   const auth = detectAuth(opts.env ?? process.env, opts.fs ?? null)
   if (auth.provider === 'openai') return createOpenAiLlmClient(opts)
+  if (auth.provider === 'codex') return createCodexLlmClient(opts)
   return createLlmClient(opts)
 }
 
