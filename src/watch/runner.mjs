@@ -47,14 +47,20 @@ export async function evaluateListing ({ listing, repo, config, identifier, sold
   }
 }
 
-export async function runWatch ({ watch, source, repo, config, identifier, sold, browse, notifier, now = Date.now(), fetchDetails = true }) {
+export async function runWatch ({
+  watch, source, repo, config, identifier, sold, browse, notifier,
+  now = Date.now(),
+  fetchDetails = true,
+  limit = null,
+  onProgress = null,
+}) {
   const runId = repo.startRun(watch.id ?? null, now)
   const errors = []
   let listingsSeen = 0
   let listingsNew = 0
   let dealsFound = 0
 
-  const scan = await source.scan(watch, { fetchDetails })
+  const scan = await source.scan(watch, { fetchDetails, limit, onProgress })
   if (!scan.ok) {
     repo.finishRun(runId, { now, listingsSeen: 0, listingsNew: 0, dealsFound: 0, errors: [scan.error], status: 'failed' })
     return { ok: false, error: scan.error, kind: scan.kind, runId }
@@ -62,8 +68,19 @@ export async function runWatch ({ watch, source, repo, config, identifier, sold,
 
   for (const w of scan.warnings ?? []) errors.push(w)
 
-  for (const listing of scan.listings) {
+  // Evaluating a listing costs a model call and an eBay lookup. When the
+  // provider is slow (the Codex CLI spawns a whole agent per call, ~20s), a
+  // full watch can run for 20+ minutes. `limit` evaluates the cheapest asks
+  // first, which is where the mispricing lives anyway.
+  // source.scan already bounded the work when `limit` was set, so this is a
+  // belt-and-braces cap for sources that ignore the option.
+  const queue = limit ? scan.listings.slice(0, limit) : scan.listings
+
+  let index = 0
+  for (const listing of queue) {
+    index++
     listingsSeen++
+    onProgress?.({ index, total: queue.length, listing })
     const up = repo.upsertListing({ ...listing, watchId: watch.id ?? null })
     if (up.isNew) listingsNew++
     if (listing.description || listing.sellerName) repo.updateListingDetail(listing.fbId, listing)
@@ -100,6 +117,8 @@ export async function runWatch ({ watch, source, repo, config, identifier, sold,
       rejections: ev.rejections,
       now,
     })
+
+    onProgress?.({ index, total: queue.length, listing, evaluation: ev })
 
     if (ev.passed) {
       dealsFound++

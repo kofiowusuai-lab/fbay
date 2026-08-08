@@ -8,7 +8,7 @@ import { PaceLimitError } from './pace.mjs'
  * A second source (Apify, another marketplace) only has to satisfy this shape.
  */
 export function createFacebookSource ({ session, pacer, clock = Date.now, scrolls = 3 }) {
-  async function scan (watch, { fetchDetails = true } = {}) {
+  async function scan (watch, { fetchDetails = true, limit = null, onProgress = null } = {}) {
     const warnings = []
     const url = buildSearchUrl({
       city: watch.city,
@@ -48,8 +48,19 @@ export function createFacebookSource ({ session, pacer, clock = Date.now, scroll
 
     if (!fetchDetails) return { ok: true, listings, warnings, url }
 
+    // Detail pages are the expensive part of a scan - each is a full Facebook
+    // SPA load behind a pacing delay. When the caller only intends to evaluate
+    // N listings, fetching details for all of them burns minutes on listings
+    // that are then discarded. Bound the work here, cheapest asks first, which
+    // is where mispricing concentrates.
+    const targets = limit
+      ? [...listings].sort((a, b) => a.priceCents - b.priceCents).slice(0, limit)
+      : listings
+
     const detailed = []
-    for (const l of listings) {
+    let done = 0
+    for (const l of targets) {
+      onProgress?.({ phase: 'detail', done: ++done, total: targets.length, listing: l })
       if (pacer.listingBudgetExhausted()) { warnings.push('daily listing budget exhausted'); break }
       if (!pacer.shouldFetchDetail()) { detailed.push(l); continue }
       try {

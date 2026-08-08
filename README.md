@@ -62,9 +62,10 @@ fbay comps "dewalt dcd791 20v drill"
 fbay watch add --name macbooks --city nyc --query "macbook pro" --max 900 --radius 40
 fbay watch list
 
-# One pass now
+# One pass now - full pipeline, reports deals
 fbay scan --watch macbooks
-fbay scan --dry            # list what it sees, write nothing
+fbay scan --watch macbooks --limit 5   # evaluate only the 5 cheapest asks
+fbay scan --dry                        # list what Facebook returns, evaluate nothing
 
 # Run continuously, alerting to Telegram
 fbay run
@@ -156,6 +157,19 @@ source/facebook  →  identify  →  comps  →  economics  →  score  →  not
 `economics` and `score` have zero I/O and are fully unit-tested against hand-computed values. Every network stage parses through a pure function fed by fixtures. Only `db/repo.mjs` knows SQLite exists, so swapping in Supabase later touches one file.
 
 Design spec and implementation plan: `docs/superpowers/`.
+
+## A note on `--limit`
+
+Evaluating one listing costs a model call plus an eBay lookup, and on the Codex
+provider that is ~20s each. `--limit N` bounds the whole scan, including the
+Facebook detail-page fetches, so a limited run finishes in minutes rather than
+tens of minutes.
+
+It selects the **cheapest asks first**, on the theory that mispricing
+concentrates at the bottom. That heuristic has an obvious failure mode: the
+cheapest listing is often junk (an empty box, a parts unit). The identity layer
+catches those, but they consume a slot. On a metered API key, prefer running
+without a limit.
 
 ## Known limits
 

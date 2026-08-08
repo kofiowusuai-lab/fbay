@@ -206,8 +206,10 @@ const COMMANDS = {
     const dry = args.includes('--dry')
     const nameIdx = args.indexOf('--watch')
     const watchName = nameIdx !== -1 ? args[nameIdx + 1] : null
+    const limIdx = args.indexOf('--limit')
+    const limit = limIdx !== -1 ? Number(args[limIdx + 1]) : null
 
-    const { config, repo } = buildContext()
+    const { config, repo, browse } = buildContext()
     const watches = repo.listWatches({ enabledOnly: true }).filter((w) => !watchName || w.name === watchName)
     if (!watches.length) {
       console.error('no enabled watches. add one with: fbay watch add --name X --city nyc --query "macbook"')
@@ -219,15 +221,75 @@ const COMMANDS = {
     const pacer = createPacer({ config: config.pace })
     const source = createFacebookSource({ session, pacer })
 
-    for (const w of watches) {
-      const r = await source.scan(w, { fetchDetails: !dry })
-      if (!r.ok) { console.error(`[${w.name}] ${r.error}`); continue }
-      console.log(`\n[${w.name}] ${r.listings.length} listings`)
-      for (const l of r.listings) console.log(`  ${money(l.priceCents).padStart(10)}  ${l.title.slice(0, 60)}`)
-      for (const warn of r.warnings) console.warn(`  warning: ${warn}`)
-      if (!dry) for (const l of r.listings) repo.upsertListing({ ...l, watchId: w.id })
+    // --dry lists what Facebook returns and stops. Without it, scan runs the
+    // full pipeline once (identify -> comps -> profit -> score) and reports
+    // deals, which is what "scan" is expected to mean.
+    if (dry) {
+      for (const w of watches) {
+        const r = await source.scan(w, { fetchDetails: false })
+        if (!r.ok) { console.error(`[${w.name}] ${r.error}`); continue }
+        console.log(`\n[${w.name}] ${r.listings.length} listings`)
+        for (const l of r.listings) console.log(`  ${money(l.priceCents).padStart(10)}  ${l.title.slice(0, 60)}`)
+        for (const warn of r.warnings) console.warn(`  warning: ${warn}`)
+      }
+      await session.close()
+      return
     }
+
+    const auth = detectAuth(process.env, fs)
+    if (!auth.ok) {
+      console.error(`\n  cannot evaluate listings: ${auth.detail}`)
+      console.error('  (use `fbay scan --dry` to just list what Facebook returns)\n')
+      await session.close()
+      process.exitCode = 1
+      return
+    }
+    console.log(`\n  using ${auth.detail}`)
+
+    const llm = createLlm()
+    const notifier = createTelegramNotifier()
+    const { sold, close } = await openSoldClient(config)
+
+    for (const w of watches) {
+      console.log(`\n[${w.name}] scanning...`)
+      const r = await runWatch({
+        watch: w, source, repo, config, sold, browse, notifier, llm, limit,
+        identifier: ({ listing }) => identify({ listing, repo, llm, config }),
+        onProgress: ({ phase, done, total: t, index, total, listing, evaluation }) => {
+          if (phase === 'detail') {
+            console.log(`  fetching detail ${done}/${t}: ${listing.title.slice(0, 44)}`)
+            return
+          }
+          if (!evaluation) {
+            process.stdout.write(`  [${index}/${total}] ${money(listing.priceCents)} ${listing.title.slice(0, 40)} ... `)
+            return
+          }
+          if (!evaluation.ok) { console.log('needs review'); return }
+          const p = evaluation.profit
+          console.log(evaluation.passed
+            ? `DEAL  net ${money(p.netCents)}`
+            : `pass  (${evaluation.rejections[0]?.rule ?? 'filtered'})`)
+        },
+      })
+      if (!r.ok) { console.error(`  failed: ${r.error}`); continue }
+      console.log(`  ${r.listingsSeen} seen, ${r.listingsNew} new, ${r.dealsFound} deals`)
+      for (const e of (r.errors ?? []).slice(0, 5)) console.warn(`  note: ${e}`)
+    }
+
+    await close()
     await session.close()
+
+    const deals = repo.listDeals({ status: 'alerted', limit: 10 })
+    if (deals.length) {
+      console.log(`\n  ${deals.length} DEAL${deals.length > 1 ? 'S' : ''}:\n`)
+      for (const d of deals) {
+        console.log(`  #${d.id}  ${d.title.slice(0, 52)}`)
+        console.log(`      ask ${money(d.ask_cents)} -> offer up to ${money(d.breakeven_buy_cents)}, net ${money(d.net_profit_cents)} (${pct(d.roi)})`)
+      }
+    } else {
+      console.log('\n  no deals cleared the thresholds. `fbay deals --status passed` shows why each was rejected.')
+    }
+    console.log('')
   },
 
   async price (args) {
@@ -483,7 +545,7 @@ daily
 watches
   fbay watch add --name X --city nyc --query "macbook" --max 900
   fbay watch list | enable <n> | disable <n> | rm <n>
-  fbay scan [--watch X] [--dry] one pass now
+  fbay scan [--watch X] [--limit N]  one pass now (--dry to just list)
   fbay run                      continuous, alerts to Telegram
 
 maintenance
