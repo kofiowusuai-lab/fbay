@@ -45,6 +45,11 @@
     "detailFetchRatio": 0.5
   },
 
+  "location": {
+    "_comment": "Facebook's Marketplace location is account state, not a URL parameter, so a city slug is a request rather than a guarantee. Every listing's country is checked; anything outside GB is dropped before it costs a model call.",
+    "country": "GB"
+  },
+
   "quietHours": { "start": 23, "end": 7 },
 
   "alerts": {

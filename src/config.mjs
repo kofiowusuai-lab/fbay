@@ -35,6 +35,7 @@ export const DEFAULTS = {
     detailFetchRatio: 0.35,
   },
   quietHours: { start: 23, end: 7 },
+  location: { country: null },
   alerts: {
     // Surface borderline finds so silence is never ambiguous.
     nearMisses: true,

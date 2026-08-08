@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parsePriceCents, parseListingNode, parseListingNodes, extractFbId } from '../src/source/facebook/parse.mjs'
+import { parsePriceCents, parseListingNode, parseListingNodes, extractFbId, isDomestic, listingCountry } from '../src/source/facebook/parse.mjs'
 
 test('extractFbId pulls the numeric id from a marketplace href', () => {
   assert.equal(extractFbId('/marketplace/item/1234567890123/?ref=search'), '1234567890123')
@@ -66,4 +66,28 @@ test('noise lines are stripped from the title candidate', () => {
 test('seenAt is stamped from the injected clock', () => {
   const l = parseListingNode({ href: '/marketplace/item/8/', lines: ['$1', 'x', 'NY'] }, { now: 4242 })
   assert.equal(l.seenAt, 4242)
+})
+
+test('a bare town name counts as domestic', () => {
+  assert.equal(isDomestic('Loughton', 'GB'), true)
+  assert.equal(isDomestic('Bracknell', 'GB'), true)
+  assert.equal(isDomestic(null, 'GB'), true)
+})
+
+test('an explicit home country counts as domestic', () => {
+  assert.equal(isDomestic('London, United Kingdom', 'GB'), true)
+  assert.equal(isDomestic('Barking, United Kingdom', 'GB'), true)
+})
+
+test('a foreign country is rejected', () => {
+  // Observed live: a London city slug served Bogota listings, because
+  // Facebook's marketplace location is account state, not a URL parameter.
+  assert.equal(isDomestic('Bogotá, Colombia', 'GB'), false)
+  assert.equal(isDomestic('Madrid, Spain', 'GB'), false)
+  assert.equal(isDomestic('Austin, United States', 'GB'), false)
+})
+
+test('listingCountry takes the trailing segment only', () => {
+  assert.equal(listingCountry('Bogotá, Colombia'), 'Colombia')
+  assert.equal(listingCountry('Loughton'), null)
 })

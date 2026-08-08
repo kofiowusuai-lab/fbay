@@ -69,3 +69,36 @@ export function parseListingNodes (nodes, opts = {}) {
   }
   return out
 }
+
+/**
+ * Reject listings outside the operator's country.
+ *
+ * Facebook's Marketplace location is account state, not a URL parameter: the
+ * /marketplace/<city>/ path SETS it and it persists across later requests. So a
+ * session whose account was last pointed at another country happily serves
+ * foreign listings for a UK city slug - observed live, returning Bogota results
+ * for a London search. The URL is a request, not a guarantee, so the country is
+ * checked on every listing.
+ *
+ * Facebook renders a domestic listing as a bare town ("Loughton") or
+ * "Town, Country", and a foreign one always with its country. So the test is
+ * the trailing country segment, not the town, which is why a whitelist of towns
+ * would be both endless and wrong.
+ */
+export const HOME_COUNTRY_PATTERNS = {
+  GB: /^(united kingdom|uk|england|scotland|wales|northern ireland)$/i,
+  US: /^(united states|usa|us)$/i,
+}
+
+export function listingCountry (city) {
+  if (!city) return null
+  const parts = String(city).split(',').map((p) => p.trim()).filter(Boolean)
+  return parts.length > 1 ? parts[parts.length - 1] : null
+}
+
+export function isDomestic (city, country = 'GB') {
+  const tail = listingCountry(city)
+  if (!tail) return true // a bare town name is local by construction
+  const pattern = HOME_COUNTRY_PATTERNS[country]
+  return pattern ? pattern.test(tail) : true
+}

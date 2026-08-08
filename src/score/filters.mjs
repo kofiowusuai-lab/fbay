@@ -1,3 +1,5 @@
+import { isDomestic } from '../source/facebook/parse.mjs'
+
 /**
  * Title-only rejections that need no model call and no eBay lookup. Running
  * these first is what keeps a bounded scan from spending its whole budget on
@@ -5,6 +7,11 @@
  * a blacklisted title was never going to survive them.
  */
 export function prefilter (listing, config) {
+  const country = config.location?.country
+  if (country && !isDomestic(listing.city, country)) {
+    return { rejected: true, rule: 'foreign_listing', reason: `listing is in ${listing.city}, outside ${country}` }
+  }
+
   const title = String(listing.title ?? '').toLowerCase()
   const kw = (config.blacklist?.keywords ?? []).find((k) => title.includes(k.toLowerCase()))
   if (kw) return { rejected: true, rule: 'blacklist_keyword', reason: `title contains blacklisted keyword "${kw}"` }

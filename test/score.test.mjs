@@ -139,3 +139,16 @@ test('a hard no is never softened into a near miss', () => {
     assert.equal(isNearMiss(ev, { minNetProfitCents: 2000 }), false, rule)
   }
 })
+
+test('prefilter drops a foreign listing before any paid call', () => {
+  const cfg = { ...DEFAULTS, location: { country: 'GB' } }
+  const r = prefilter({ title: 'Makita drill', priceCents: 5000, city: 'Bogotá, Colombia' }, cfg)
+  assert.equal(r.rejected, true)
+  assert.equal(r.rule, 'foreign_listing')
+})
+
+test('prefilter keeps a domestic listing', () => {
+  const cfg = { ...DEFAULTS, location: { country: 'GB' } }
+  assert.equal(prefilter({ title: 'Makita drill', priceCents: 5000, city: 'Loughton' }, cfg).rejected, false)
+  assert.equal(prefilter({ title: 'Makita drill', priceCents: 5000, city: 'London, United Kingdom' }, cfg).rejected, false)
+})
