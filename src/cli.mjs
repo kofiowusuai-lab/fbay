@@ -15,7 +15,7 @@ import { createPacer } from './source/facebook/pace.mjs'
 import { createLlm, detectAuth } from './llm.mjs'
 import { identify } from './identify/extract.mjs'
 import { evaluateListing, runWatch } from './watch/runner.mjs'
-import { extractFbId, parsePriceCents } from './source/facebook/parse.mjs'
+import { extractFbId, parsePriceCents, parseListingNodes, isDomestic } from './source/facebook/parse.mjs'
 import { parseDetail } from './source/facebook/detail.mjs'
 import { draftOffer } from './notify/draft.mjs'
 import { createTelegramNotifier } from './notify/telegram.mjs'
@@ -418,6 +418,45 @@ const COMMANDS = {
     console.log(`deal #${id} -> ${newStatus}`)
   },
 
+  async 'fb-location' () {
+    const config = loadConfig()
+    console.log('\n  Opening FBay\u2019s Facebook profile (NOT your normal Chrome).')
+    console.log('  Facebook stores Marketplace location per account, and it overrides')
+    console.log('  the city in the URL - so it has to be changed here, in this profile.\n')
+    console.log('  In the window that opens:')
+    console.log('    1. Click the location pin / "Within ... miles" control, top left')
+    console.log('    2. Type your town, pick it from the list')
+    console.log('    3. Set the radius, then Apply\n')
+    console.log('  Leave this running - it will confirm when the location is domestic.\n')
+
+    const session = await openSession({ headless: false })
+    await session.goto('https://www.facebook.com/marketplace/', { waitMs: 3000 })
+
+    const deadline = Date.now() + 300000
+    let seen = null
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 5000))
+      try {
+        const nodes = await session.extractNodes()
+        const cities = parseListingNodes(nodes).map((l) => l.city).filter(Boolean)
+        if (!cities.length) continue
+        const domestic = cities.filter((c) => isDomestic(c, config.location?.country ?? 'GB'))
+        seen = { total: cities.length, domestic: domestic.length, sample: cities.slice(0, 3) }
+        console.log(`  seeing ${seen.domestic}/${seen.total} local listings — e.g. ${seen.sample.join(', ')}`)
+        if (seen.domestic > seen.total / 2) {
+          console.log(`\n  Location looks correct. Marketplace is serving ${config.location?.country ?? 'GB'} listings.\n`)
+          break
+        }
+      } catch { /* page mid-navigation */ }
+    }
+
+    if (!seen || seen.domestic <= seen.total / 2) {
+      console.log('\n  Still seeing mostly non-local listings. Set the location and run this again.\n')
+      process.exitCode = 1
+    }
+    await session.close().catch(() => {})
+  },
+
   async 'telegram-setup' () {
     const token = process.env.TELEGRAM_BOT_TOKEN
     if (!token) { console.error('\n  TELEGRAM_BOT_TOKEN is not set in .env\n'); process.exitCode = 1; return }
@@ -613,6 +652,7 @@ setup
   fbay login                    log into Facebook once (opens a browser)
   fbay ebay-login               sign into eBay once (sold listings need it)
   fbay telegram-setup           link your Telegram chat for alerts
+  fbay fb-location              set Marketplace location (opens FBay's browser)
   fbay doctor                   check every dependency
 
 daily
