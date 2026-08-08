@@ -45,7 +45,14 @@ export async function runLoop ({
     }
 
     for (const watch of due) {
-      const r = await runOne(watch)
+      // One watch failing must not end the loop - the next watch, and the next
+      // pass, may be perfectly healthy.
+      let r
+      try {
+        r = await runOne(watch)
+      } catch (e) {
+        r = { ok: false, error: `unhandled: ${String(e.message ?? e).split('\n')[0].slice(0, 140)}` }
+      }
       logger.log(`[${watch.name}] ${r.ok ? `${r.listingsSeen} seen, ${r.listingsNew} new, ${r.dealsFound} deals` : `failed: ${r.error}`}`)
       if (!r.ok && r.kind) {
         await notifier.notifyAlert(`scan halted on watch "${watch.name}": ${r.error}`)

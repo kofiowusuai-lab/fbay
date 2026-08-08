@@ -85,3 +85,33 @@ test('no limit means every listing is still considered', async () => {
   const r = await source.scan({ city: 'nyc', query: 'x' }, { fetchDetails: true })
   assert.equal(r.listings.length, 7)
 })
+
+test('a navigation timeout is reported, never thrown', async () => {
+  // An unattended monitor that dies on one slow page stops finding deals
+  // silently. Facebook item pages time out often enough that this is normal.
+  const failing = {
+    ...sessionWith(3),
+    goto: async (url) => (/item/.test(url)
+      ? { ok: false, url, bodyText: '', block: { blocked: false, kind: null }, error: 'navigation failed: Timeout 45000ms exceeded' }
+      : { ok: true, url, bodyText: 'ok', block: { blocked: false, kind: null } }),
+  }
+  const pacer = createPacer({ config: { ...DEFAULTS.pace, detailFetchRatio: 1 }, sleepImpl: async () => {}, rng: () => 0 })
+  const source = createFacebookSource({ session: failing, pacer })
+  const r = await source.scan({ city: 'nyc', query: 'x' }, { fetchDetails: true, limit: 2 })
+
+  assert.equal(r.ok, true, 'the scan survives a failed detail page')
+  assert.equal(r.listings.length, 2, 'card-level data is kept')
+  assert.ok(r.warnings.some((w) => /Timeout/.test(w)), 'the failure is recorded, not swallowed')
+})
+
+test('a failed search page ends that scan without throwing', async () => {
+  const failing = {
+    ...sessionWith(3),
+    goto: async (url) => ({ ok: false, url, bodyText: '', block: { blocked: false, kind: null }, error: 'navigation failed: net::ERR' }),
+  }
+  const pacer = createPacer({ config: DEFAULTS.pace, sleepImpl: async () => {}, rng: () => 0 })
+  const source = createFacebookSource({ session: failing, pacer })
+  const r = await source.scan({ city: 'nyc', query: 'x' }, { fetchDetails: true })
+  assert.equal(r.ok, false)
+  assert.match(r.error, /navigation failed/)
+})

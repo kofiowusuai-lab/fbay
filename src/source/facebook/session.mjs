@@ -62,11 +62,27 @@ export async function openSession ({
     page,
     async close () { await context.close() },
 
-    async goto (url, { waitMs = 2500 } = {}) {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 })
-      await page.waitForTimeout(waitMs)
-      const bodyText = await page.evaluate(() => document.body.innerText.slice(0, 4000))
-      return { url: page.url(), bodyText, block: detectBlock({ url: page.url(), bodyText }) }
+    /**
+     * Never throws. A single slow Facebook page must not end the run: an
+     * unattended monitor that dies on one timeout stops finding deals silently,
+     * and Marketplace item pages are heavy enough that occasional timeouts are
+     * normal rather than exceptional.
+     */
+    async goto (url, { waitMs = 2500, timeout = 45000 } = {}) {
+      try {
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
+        await page.waitForTimeout(waitMs)
+        const bodyText = await page.evaluate(() => document.body.innerText.slice(0, 4000))
+        return { ok: true, url: page.url(), bodyText, block: detectBlock({ url: page.url(), bodyText }) }
+      } catch (e) {
+        return {
+          ok: false,
+          url,
+          bodyText: '',
+          block: { blocked: false, kind: null },
+          error: `navigation failed: ${String(e.message ?? e).split('\n')[0].slice(0, 120)}`,
+        }
+      }
     },
 
     /**

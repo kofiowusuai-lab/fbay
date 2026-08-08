@@ -28,6 +28,9 @@ export function createFacebookSource ({ session, pacer, clock = Date.now, scroll
     }
 
     const nav = await session.goto(url)
+    if (nav.ok === false) {
+      return { ok: false, error: nav.error, listings: [], warnings }
+    }
     if (nav.block.blocked) {
       const info = pacer.recordBlock(nav.block.kind)
       return {
@@ -71,6 +74,13 @@ export function createFacebookSource ({ session, pacer, clock = Date.now, scroll
         throw e
       }
       const dnav = await session.goto(l.url, { waitMs: 2000 })
+      if (dnav.ok === false) {
+        // Keep the card-level data and move on; a detail page is an enrichment,
+        // not a prerequisite.
+        warnings.push(`${l.fbId}: ${dnav.error}`)
+        detailed.push(l)
+        continue
+      }
       if (dnav.block.blocked) {
         pacer.recordBlock(dnav.block.kind)
         warnings.push(`blocked on detail fetch: ${dnav.block.kind}`)
