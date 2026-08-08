@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { openDb } from '../src/db/db.mjs'
 import { createRepo } from '../src/db/repo.mjs'
 import { contentHash, identityKeyFor } from '../src/identify/cache.mjs'
-import { identify, IDENTITY_SCHEMA, buildUserPrompt, normaliseIdentity, CATEGORIES, CONDITIONS } from '../src/identify/extract.mjs'
+import { identify, IDENTITY_SCHEMA, buildUserPrompt, normaliseIdentity, CATEGORIES, CONDITIONS, pickMustTokens, MAX_MUST_TOKENS } from '../src/identify/extract.mjs'
 import { DEFAULTS } from '../src/config.mjs'
 
 const listing = { fbId: '1', title: 'MacBook good condition', description: '13 inch 2019 256gb', priceCents: 40000, imageUrls: ['https://x/a.jpg'] }
@@ -120,4 +120,16 @@ test('a model failure returns ok:false and persists nothing', async () => {
   assert.equal(r.ok, false)
   assert.match(r.error, /overloaded/)
   assert.equal(repo.getIdentityByContentHash(contentHash(listing)), undefined)
+})
+
+test('mustTokens are capped, digit-bearing ones kept first', () => {
+  const t = pickMustTokens(['Apple', 'MacBook Pro', '16-inch', '2019', 'i7', '16GB', '512GB', 'Space Gray'])
+  assert.ok(t.length <= MAX_MUST_TOKENS, `expected <= ${MAX_MUST_TOKENS}, got ${t.length}`)
+  assert.ok(t.every((x) => /\d/.test(x)), 'discriminating tokens carry digits')
+  assert.ok(!t.includes('apple'), 'brand alone does not discriminate')
+})
+
+test('pickMustTokens falls back to non-digit tokens when there are none with digits', () => {
+  const t = pickMustTokens(['Dewalt', 'Brushless', 'Hammer Drill'])
+  assert.equal(t.length, 3)
 })

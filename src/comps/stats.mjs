@@ -15,12 +15,29 @@ export function excludeReasonFor (title) {
   return null
 }
 
+/**
+ * A required token is matched by tokenizing it the same way the comp title is
+ * tokenized, then requiring every part to be present.
+ *
+ * A naive `tokenSet.has(rawToken)` looks right and silently matches nothing for
+ * any multi-word or punctuated token: a model returns "MacBook Pro" or
+ * "16-inch", the comp title tokenizes to ["macbook","pro","16","inch"], and the
+ * lookup fails on every single comp. The symptom is "no usable sold comps"
+ * across the board, which reads like eBay returning nothing rather than a
+ * filter bug.
+ */
+export function tokenMatches (mustToken, titleTokens) {
+  const parts = tokenize(mustToken)
+  if (!parts.length) return true
+  return parts.every((p) => titleTokens.has(p))
+}
+
 export function filterComps (comps, { mustTokens = [] } = {}) {
   return comps.map((c) => {
     const heuristic = excludeReasonFor(c.title)
     if (heuristic) return { ...c, included: false, excludeReason: heuristic }
     const toks = new Set(tokenize(c.title))
-    const missing = mustTokens.find((t) => !toks.has(String(t).toLowerCase()))
+    const missing = mustTokens.find((t) => !tokenMatches(t, toks))
     if (missing) return { ...c, included: false, excludeReason: `missing_token:${missing}` }
     return { ...c, included: true, excludeReason: null }
   })

@@ -56,6 +56,25 @@ export function buildUserPrompt (listing) {
   ].filter(Boolean).join('\n')
 }
 
+/**
+ * Keep at most MAX_MUST_TOKENS, preferring the discriminating ones.
+ *
+ * Models happily return eight tokens ("Apple", "MacBook Pro", "16-inch",
+ * "2019", "i7", "16GB", "512GB", "Space Gray"). Every one is a hard AND against
+ * comp titles, and real listings never contain all eight - so the comp set
+ * empties out and the item cannot be valued. Tokens containing a digit (model
+ * numbers, capacities, generations) do the actual discriminating; brand and
+ * colour words do not.
+ */
+export const MAX_MUST_TOKENS = 4
+
+export function pickMustTokens (raw) {
+  const all = (raw ?? []).map((t) => String(t).toLowerCase().trim()).filter(Boolean)
+  const withDigits = all.filter((t) => /\d/.test(t))
+  const without = all.filter((t) => !/\d/.test(t))
+  return [...withDigits, ...without].slice(0, MAX_MUST_TOKENS)
+}
+
 export function normaliseIdentity (raw) {
   const clamp = (n) => Math.max(0, Math.min(1, Number(n) || 0))
   const category = CATEGORIES.includes(raw.category) ? raw.category : 'other'
@@ -70,7 +89,7 @@ export function normaliseIdentity (raw) {
     condition,
     identityConfidence: clamp(raw.identityConfidence),
     query: String(raw.query || '').trim(),
-    mustTokens: (raw.mustTokens ?? []).map((t) => String(t).toLowerCase().trim()).filter(Boolean),
+    mustTokens: pickMustTokens(raw.mustTokens),
     weightLb: raw.weightLb && raw.weightLb > 0 ? raw.weightLb : null,
   }
   identity.identityKey = identityKeyFor(identity)

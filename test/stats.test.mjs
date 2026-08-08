@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { tokenize, excludeReasonFor, filterComps, median, percentile, iqrTrim, buildCompSet } from '../src/comps/stats.mjs'
+import { tokenize, excludeReasonFor, filterComps, median, percentile, iqrTrim, buildCompSet, tokenMatches } from '../src/comps/stats.mjs'
 
 const DAY = 86400000
 
@@ -112,4 +112,24 @@ test('an available active count of genuinely zero is still 100%, not null', () =
   const sold = [{ title: 'iPhone 13', priceCents: 30000, soldAt: now - DAY }]
   const cs = buildCompSet({ soldComps: sold, activeCount: 0, activeCountAvailable: true, mustTokens: ['iphone'], now })
   assert.equal(cs.sellThrough, 1, 'zero competition is a real signal, distinct from an unknown')
+})
+
+test('a multi-word required token matches when all its parts are present', () => {
+  // This is the bug that made every listing report "no usable sold comps":
+  // "MacBook Pro" was looked up whole in a set of single words.
+  const toks = new Set(tokenize('Apple MacBook Pro 16-inch 2019 512GB'))
+  assert.equal(tokenMatches('MacBook Pro', toks), true)
+  assert.equal(tokenMatches('16-inch', toks), true)
+  assert.equal(tokenMatches('512GB', toks), true)
+  assert.equal(tokenMatches('MacBook Air', toks), false, 'a genuinely wrong model must still fail')
+})
+
+test('filterComps keeps comps that satisfy punctuated tokens', () => {
+  const comps = [
+    { title: 'Apple MacBook Pro 16 inch 2019 512GB i7', priceCents: 90000 },
+    { title: 'Apple MacBook Air 13 inch 2019 256GB', priceCents: 40000 },
+  ]
+  const out = filterComps(comps, { mustTokens: ['MacBook Pro', '16-inch', '512GB'] })
+  assert.equal(out[0].included, true, 'the matching model must survive')
+  assert.equal(out[1].included, false)
 })
