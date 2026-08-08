@@ -67,13 +67,16 @@ test('limit bounds the expensive detail fetches, not just the evaluation', async
   assert.ok(detailPages <= 3, `expected at most 3 detail fetches, got ${detailPages}`)
 })
 
-test('limit picks the cheapest asks first', async () => {
+test('limit keeps feed order (newest first), it does not sort by price', async () => {
+  // Sorting by price sends a bounded budget to the bottom of the market, which
+  // on Marketplace is boxes, cases and $1 bait listings. Feed order is
+  // newest-first, and being early to a fresh listing is the actual edge.
   const pacer = createPacer({ config: { ...DEFAULTS.pace, detailFetchRatio: 0 }, sleepImpl: async () => {}, rng: () => 0 })
   const source = createFacebookSource({ session: sessionWith(10), pacer })
   const r = await source.scan({ city: 'nyc', query: 'x' }, { fetchDetails: true, limit: 3 })
   const prices = r.listings.map((l) => l.priceCents)
-  assert.deepEqual(prices, [...prices].sort((a, b) => a - b))
-  assert.equal(prices[0], 10000, 'cheapest listing ($100) must be first - prices are cents')
+  assert.equal(prices[0], 100000, 'first item in the feed, not the cheapest')
+  assert.notDeepEqual(prices, [...prices].sort((a, b) => a - b), 'must not be price-sorted')
 })
 
 test('no limit means every listing is still considered', async () => {

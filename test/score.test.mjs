@@ -1,6 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { applyFilters } from '../src/score/filters.mjs'
+import { applyFilters, prefilter } from '../src/score/filters.mjs'
+
+const applyPre = (listing) => prefilter(listing, DEFAULTS)
 import { scoreDeal, saturate } from '../src/score/rank.mjs'
 import { DEFAULTS } from '../src/config.mjs'
 
@@ -98,4 +100,20 @@ test('a null sell-through scores zero velocity, not full marks', () => {
   const known = scoreDeal(good, DEFAULTS)
   const unknown = scoreDeal({ ...good, compset: { ...good.compset, sellThrough: null } }, DEFAULTS)
   assert.ok(unknown < known, 'an unknown must never outscore a measured good value')
+})
+
+test('prefilter rejects blacklisted titles with no model call', () => {
+  const r = applyPre({ title: 'AirPods Pro 1 (BOX ONLY)', priceCents: 500 })
+  assert.equal(r.rejected, true)
+  assert.equal(r.rule, 'blacklist_keyword')
+})
+
+test('prefilter rejects an ask above the ceiling', () => {
+  const r = applyPre({ title: 'Clean iPhone', priceCents: 999999 })
+  assert.equal(r.rejected, true)
+  assert.equal(r.rule, 'max_ask')
+})
+
+test('prefilter passes a plausible listing through', () => {
+  assert.equal(applyPre({ title: 'DeWalt DCD791 drill', priceCents: 6000 }).rejected, false)
 })

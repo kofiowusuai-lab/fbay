@@ -1,6 +1,6 @@
 import { getCompSet } from '../comps/index.mjs'
 import { computeProfit } from '../economics/profit.mjs'
-import { applyFilters } from '../score/filters.mjs'
+import { applyFilters, prefilter } from '../score/filters.mjs'
 import { scoreDeal } from '../score/rank.mjs'
 
 /**
@@ -72,9 +72,16 @@ export async function runWatch ({
   // provider is slow (the Codex CLI spawns a whole agent per call, ~20s), a
   // full watch can run for 20+ minutes. `limit` evaluates the cheapest asks
   // first, which is where the mispricing lives anyway.
-  // source.scan already bounded the work when `limit` was set, so this is a
+  // Drop titles that can never pass before spending a model call on them.
+  const viable = scan.listings.filter((l) => {
+    const pre = prefilter(l, config)
+    if (pre.rejected) errors.push(`skipped ${l.fbId}: ${pre.reason}`)
+    return !pre.rejected
+  })
+
+  // source.scan already bounded the work when `limit` was set; this is a
   // belt-and-braces cap for sources that ignore the option.
-  const queue = limit ? scan.listings.slice(0, limit) : scan.listings
+  const queue = limit ? viable.slice(0, limit) : viable
 
   let index = 0
   for (const listing of queue) {

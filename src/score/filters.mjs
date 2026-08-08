@@ -1,3 +1,20 @@
+/**
+ * Title-only rejections that need no model call and no eBay lookup. Running
+ * these first is what keeps a bounded scan from spending its whole budget on
+ * "(BOX ONLY)" listings - identification and comps are the expensive steps, and
+ * a blacklisted title was never going to survive them.
+ */
+export function prefilter (listing, config) {
+  const title = String(listing.title ?? '').toLowerCase()
+  const kw = (config.blacklist?.keywords ?? []).find((k) => title.includes(k.toLowerCase()))
+  if (kw) return { rejected: true, rule: 'blacklist_keyword', reason: `title contains blacklisted keyword "${kw}"` }
+
+  if (listing.priceCents > config.thresholds.maxAskCents) {
+    return { rejected: true, rule: 'max_ask', reason: `ask above the ${config.thresholds.maxAskCents / 100} ceiling` }
+  }
+  return { rejected: false }
+}
+
 function money (cents) {
   return `$${(cents / 100).toFixed(2)}`
 }

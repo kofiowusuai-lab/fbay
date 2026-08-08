@@ -49,13 +49,14 @@ export function createFacebookSource ({ session, pacer, clock = Date.now, scroll
     if (!fetchDetails) return { ok: true, listings, warnings, url }
 
     // Detail pages are the expensive part of a scan - each is a full Facebook
-    // SPA load behind a pacing delay. When the caller only intends to evaluate
-    // N listings, fetching details for all of them burns minutes on listings
-    // that are then discarded. Bound the work here, cheapest asks first, which
-    // is where mispricing concentrates.
-    const targets = limit
-      ? [...listings].sort((a, b) => a.priceCents - b.priceCents).slice(0, limit)
-      : listings
+    // SPA load behind a pacing delay - so a bounded run must choose carefully.
+    //
+    // Feed order, NOT cheapest-first. The search is sorted newest-first, and
+    // being early to a fresh listing is the whole edge in arbitrage. Sorting by
+    // price instead sends the budget to the bottom of the market, which on
+    // Marketplace is empty boxes, phone cases and $1 bait listings - measured,
+    // not assumed: a cheapest-first pass spent every slot on exactly those.
+    const targets = limit ? listings.slice(0, limit) : listings
 
     const detailed = []
     let done = 0

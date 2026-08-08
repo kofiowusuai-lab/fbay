@@ -35,7 +35,17 @@ export const DEFAULTS = {
     detailFetchRatio: 0.35,
   },
   quietHours: { start: 23, end: 7 },
-  blacklist: { keywords: ['broken', 'as is', 'for parts', 'no returns', 'scam'], sellers: [] },
+  blacklist: {
+    // Universal traps: things that read like a bargain and are worth nothing.
+    // Applied as a pre-filter, before any model call, so they cost nothing.
+    keywords: [
+      'broken', 'as is', 'for parts', 'no returns', 'scam',
+      'box only', 'empty box', 'case only', 'read description',
+      'cracked', 'water damage', 'no power',
+      'icloud', 'activation lock', 'bad esn', 'blacklisted', 'financed',
+    ],
+    sellers: [],
+  },
 }
 
 function isPlainObject (v) {
