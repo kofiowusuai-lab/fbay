@@ -32,10 +32,21 @@ export async function openEbaySession ({
     page,
     async close () { await context.close() },
 
+    /**
+     * Definitive, not a text sniff. Sniffing the header for "Sign in" reported
+     * a signed-in session on a profile that had never logged in, while the
+     * canaries correctly failed on the sign-in wall. A doctor that lies about
+     * the thing it exists to check is worse than no doctor.
+     *
+     * This loads a page that requires authentication and sees whether eBay
+     * keeps us there or bounces us to the sign-in flow.
+     */
     async isSignedIn () {
-      await page.goto('https://www.ebay.com/', { waitUntil: 'domcontentloaded', timeout: 45000 })
-      await page.waitForTimeout(1500)
-      return page.evaluate(() => !/^\s*Sign in\b/i.test(document.body.innerText.slice(0, 2000)))
+      await page.goto('https://www.ebay.com/mye/myebay/summary', { waitUntil: 'domcontentloaded', timeout: 45000 })
+      await page.waitForTimeout(2000)
+      const url = page.url()
+      const title = await page.title()
+      return !/signin|sign in or register|security measure/i.test(`${url} ${title}`)
     },
 
     async fetchHtml (url, { waitMs = 3500 } = {}) {

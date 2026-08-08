@@ -5,3 +5,6 @@ node_modules/
 data/
 .next/
 fb-profile/
+ebay-profile/
+dashboard/node_modules/
+dashboard/.next/

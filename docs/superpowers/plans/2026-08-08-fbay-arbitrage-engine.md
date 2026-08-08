@@ -4631,11 +4631,18 @@ function roundToFive (cents) {
   return Math.floor(cents / 500) * 500
 }
 
+/**
+ * Order matters. The minFraction floor stops us insulting a seller with an
+ * absurd lowball, but it must never lift the offer above breakeven: that would
+ * mean offering more than the item is worth to us. So the floor is applied to
+ * the desired offer, and breakeven caps the result absolutely.
+ */
 export function offerPriceCents ({ askCents, breakevenBuyCents, discount = 0.2, minFraction = 0.6 }) {
   const target = askCents * (1 - discount)
   const floor = askCents * minFraction
-  const capped = Math.min(target, breakevenBuyCents ?? target)
-  return Math.max(roundToFive(Math.max(capped, floor)), 100)
+  const desired = Math.max(target, floor)
+  const capped = Math.min(desired, breakevenBuyCents ?? desired)
+  return Math.max(roundToFive(capped), 100)
 }
 
 export function buildDraftPrompt ({ listing, identity, offerCents }) {
@@ -4868,15 +4875,21 @@ test('dueWatches returns only enabled watches past their interval', () => {
     { name: 'c', enabled: 0, interval_minutes: 1, last_run_at: 0 },
     { name: 'd', enabled: 1, interval_minutes: 60, last_run_at: null },
   ]
-  assert.deepEqual(dueWatches(watches, now).map((w) => w.name), ['a', 'd'])
+  // Order is deliberately randomised, so compare the SET, not the sequence.
+  const names = dueWatches(watches, now).map((w) => w.name).sort()
+  assert.deepEqual(names, ['a', 'd'])
 })
 
 test('dueWatches shuffles order so the traffic pattern is not periodic', () => {
   const now = 1e9
   const watches = Array.from({ length: 8 }, (_, i) => ({ name: String(i), enabled: 1, interval_minutes: 1, last_run_at: 0 }))
-  const a = dueWatches(watches, now, () => 0.9).map((w) => w.name).join()
-  const b = dueWatches(watches, now, () => 0.1).map((w) => w.name).join()
+  // A constant rng cannot shuffle: every sort key is equal and the sort is
+  // stable. Feed a varying sequence, which is what Math.random actually does.
+  const seq = (vals) => { let i = 0; return () => vals[i++ % vals.length] }
+  const a = dueWatches(watches, now, seq([0.9, 0.1, 0.8, 0.2, 0.7, 0.3, 0.6, 0.4])).map((w) => w.name).join()
+  const b = dueWatches(watches, now, seq([0.1, 0.9, 0.2, 0.8, 0.3, 0.7, 0.4, 0.6])).map((w) => w.name).join()
   assert.notEqual(a, b)
+  assert.deepEqual(a.split(',').sort(), ['0', '1', '2', '3', '4', '5', '6', '7'], 'shuffling must not lose or duplicate a watch')
 })
 
 test('jitter stays within the requested fraction', () => {

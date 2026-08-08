@@ -12,7 +12,13 @@ import { createPacer } from '../src/source/facebook/pace.mjs'
 import { formatDealCard } from '../src/notify/telegram.mjs'
 import { DEFAULTS } from '../src/config.mjs'
 
-const FIXTURE = fs.readFileSync(path.join(import.meta.dirname, 'fixtures/ebay-sold-iphone.html'), 'utf8')
+// Captured live from eBay. NOTE: eBay geolocated the capture and returned
+// Brazilian real prices, so the fixture currency is BRL. That is not a defect
+// to paper over - it is the exact trap the currency guard exists to catch, and
+// the tests below exercise both directions of it.
+const FIXTURE = fs.readFileSync(path.join(import.meta.dirname, 'fixtures/ebay-cards-iphone.html'), 'utf8')
+const FIXTURE_CURRENCY = 'BRL'
+const MATCHING_CONFIG = { ...DEFAULTS, currency: FIXTURE_CURRENCY }
 const NOW = Date.UTC(2026, 7, 8, 12, 0, 0)
 
 // A fake browser session returning one obviously underpriced iPhone.
@@ -37,7 +43,7 @@ const IDENTITY_DATA = {
 
 test('a full pipeline pass turns one fixture listing into an alerted deal', async () => {
   const repo = createRepo(openDb(':memory:'))
-  const config = DEFAULTS
+  const config = MATCHING_CONFIG
 
   const pacer = createPacer({ config: config.pace, clock: () => NOW, sleepImpl: async () => {}, rng: () => 0.1 })
   const source = createFacebookSource({ session: fakeSession, pacer, clock: () => NOW })
@@ -52,7 +58,7 @@ test('a full pipeline pass turns one fixture listing into an alerted deal', asyn
   const r = await runWatch({
     watch: { id: null, name: 'iphones', city: 'nyc', query: 'iphone 13' },
     source, repo, config, sold, browse, notifier, now: NOW,
-    identifier: ({ listing }) => identify({ listing, repo, llm, config, imageFetcher: async () => null, now: NOW }),
+    identifier: ({ listing }) => identify({ listing, repo, llm, config: MATCHING_CONFIG, imageFetcher: async () => null, now: NOW }),
   })
 
   assert.equal(r.ok, true)
@@ -89,8 +95,8 @@ test('the same run twice produces exactly one alert', async () => {
   const notifier = { notifyDeal: async (d) => alerts.push(d), notifyAlert: async () => {} }
   const args = {
     watch: { id: null, name: 'iphones', city: 'nyc', query: 'iphone 13' },
-    source, repo, config: DEFAULTS, sold, browse, notifier, now: NOW,
-    identifier: ({ listing }) => identify({ listing, repo, llm, config: DEFAULTS, imageFetcher: async () => null, now: NOW }),
+    source, repo, config: MATCHING_CONFIG, sold, browse, notifier, now: NOW,
+    identifier: ({ listing }) => identify({ listing, repo, llm, config: MATCHING_CONFIG, imageFetcher: async () => null, now: NOW }),
   }
   await runWatch(args)
   await runWatch(args)
@@ -107,9 +113,9 @@ test('an eBay outage marks the listing needs_review instead of dropping it', asy
 
   const r = await runWatch({
     watch: { id: null, name: 'iphones', city: 'nyc', query: 'iphone 13' },
-    source, repo, config: DEFAULTS, sold, browse, now: NOW,
+    source, repo, config: MATCHING_CONFIG, sold, browse, now: NOW,
     notifier: { notifyDeal: async () => {}, notifyAlert: async () => {} },
-    identifier: ({ listing }) => identify({ listing, repo, llm, config: DEFAULTS, imageFetcher: async () => null, now: NOW }),
+    identifier: ({ listing }) => identify({ listing, repo, llm, config: MATCHING_CONFIG, imageFetcher: async () => null, now: NOW }),
   })
 
   assert.equal(r.dealsFound, 0)
@@ -124,7 +130,7 @@ test('a facebook block halts the run and reports the kind', async () => {
   const source = createFacebookSource({ session: blocked, pacer, clock: () => NOW })
 
   const r = await runWatch({
-    watch: { id: null, name: 'x' }, source, repo, config: DEFAULTS,
+    watch: { id: null, name: 'x', city: 'nyc', query: 'x' }, source, repo, config: MATCHING_CONFIG,
     sold: { fetchSold: async () => ({ ok: true, strategy: 's', comps: [] }) },
     browse: { searchActive: async () => ({ ok: true, total: 0 }) },
     notifier: { notifyDeal: async () => {}, notifyAlert: async () => {} },
@@ -135,4 +141,30 @@ test('a facebook block halts the run and reports the kind', async () => {
   assert.equal(r.ok, false)
   assert.equal(r.kind, 'checkpoint')
   assert.equal(pacer.isCoolingDown(), true)
+})
+
+test('a currency mismatch blocks the deal end to end instead of mispricing it', async () => {
+  const repo = createRepo(openDb(':memory:'))
+  const pacer = createPacer({ config: DEFAULTS.pace, clock: () => NOW, sleepImpl: async () => {}, rng: () => 0.1 })
+  const source = createFacebookSource({ session: fakeSession, pacer, clock: () => NOW })
+  const sold = createSoldClient({ fetchImpl: async () => ({ ok: true, status: 200, text: async () => FIXTURE }) })
+  const browse = { searchActive: async () => ({ ok: true, total: 40, items: [] }) }
+  const llm = { extractStructured: async () => ({ ok: true, data: IDENTITY_DATA, usage: {}, model: 'test' }) }
+  const alerts = []
+
+  // The fixture is BRL. Under a USD config those numbers would value a $60
+  // phone against a ~R$1,300 median and look like a 20x return.
+  const usdConfig = { ...DEFAULTS, currency: 'USD' }
+  const r = await runWatch({
+    watch: { id: null, name: 'iphones', city: 'nyc', query: 'iphone 13' },
+    source, repo, config: usdConfig, sold, browse, now: NOW,
+    notifier: { notifyDeal: async (d) => alerts.push(d), notifyAlert: async () => {} },
+    identifier: ({ listing }) => identify({ listing, repo, llm, config: usdConfig, imageFetcher: async () => null, now: NOW }),
+  })
+
+  assert.equal(r.dealsFound, 0, 'a foreign-currency compset must never produce a deal')
+  assert.equal(alerts.length, 0)
+  const review = repo.listDeals({ status: 'needs_review' })
+  assert.equal(review.length, 1)
+  assert.match(review[0].error, /BRL/)
 })
