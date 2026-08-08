@@ -2,6 +2,7 @@ import { getCompSet } from '../comps/index.mjs'
 import { computeProfit } from '../economics/profit.mjs'
 import { applyFilters, prefilter, isNearMiss } from '../score/filters.mjs'
 import { scoreDeal } from '../score/rank.mjs'
+import { mapPool } from './pool.mjs'
 
 /**
  * Runs one listing through identify -> comps -> economics -> filters -> score.
@@ -53,6 +54,7 @@ export async function runWatch ({
   fetchDetails = true,
   limit = null,
   onProgress = null,
+  concurrency = 1,
 }) {
   const runId = repo.startRun(watch.id ?? null, now)
   const errors = []
@@ -84,11 +86,14 @@ export async function runWatch ({
   // belt-and-braces cap for sources that ignore the option.
   const queue = limit ? viable.slice(0, limit) : viable
 
+  // Writes happen up front and synchronously: better-sqlite3 is synchronous, so
+  // doing the upserts before fanning out keeps ordering deterministic and keeps
+  // the concurrent section purely network- and model-bound.
+  const pending = []
   let index = 0
   for (const listing of queue) {
     index++
     listingsSeen++
-    onProgress?.({ index, total: queue.length, listing })
     const up = repo.upsertListing({ ...listing, watchId: watch.id ?? null })
     if (up.isNew) listingsNew++
     if (listing.description || listing.sellerName) repo.updateListingDetail(listing.fbId, listing)
@@ -101,12 +106,18 @@ export async function runWatch ({
       ? { previousPriceCents: up.previousPriceCents, currentPriceCents: listing.priceCents }
       : null
 
+    pending.push({ listing, up, priceDrop, index })
+  }
+
+  await mapPool(pending, concurrency, async ({ listing, up, priceDrop, index }) => {
+    onProgress?.({ index, total: pending.length, listing })
     const ev = await evaluateListing({ listing, repo, config, identifier, sold, browse, now, priceDrop })
 
     if (!ev.ok) {
       errors.push(`${listing.fbId}: ${ev.error}`)
       repo.upsertDeal({ listingId: up.id, status: 'needs_review', error: ev.error, identityKey: ev.identity?.identityKey, now })
-      continue
+      onProgress?.({ index, total: pending.length, listing, evaluation: ev })
+      return
     }
 
     const status = ev.passed ? 'alerted' : 'passed'
@@ -150,7 +161,7 @@ export async function runWatch ({
         currency: config.currency, marketplace: config.marketplace,
       })
     }
-  }
+  })
 
   if (watch.id) repo.touchWatch(watch.id, now)
   repo.finishRun(runId, { now, listingsSeen, listingsNew, dealsFound, errors, status: 'ok' })

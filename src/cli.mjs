@@ -265,7 +265,7 @@ const COMMANDS = {
     console.log(`\n  using ${auth.detail}`)
 
     const llm = createLlm()
-    const notifier = createTelegramNotifier()
+    const notifier = createTelegramNotifier({ operational: config.alerts?.operational ?? 'critical' })
     const { sold, browse: bBrowse, close } = await openSoldClient(config)
     const browseClient = await pickBrowse(browse, bBrowse)
 
@@ -536,7 +536,7 @@ const COMMANDS = {
       detail: tok.ok === true ? 'token acquired' : `unavailable (${tok.__error ?? tok.error}) - falling back to the browser session`,
     })
 
-    const notifier = createTelegramNotifier()
+    const notifier = createTelegramNotifier({ operational: config.alerts?.operational ?? 'critical' })
     checks.push({ check: 'telegram', ok: notifier.configured, detail: notifier.configured ? 'configured' : 'TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID missing' })
 
     const ebay = await withTimeout('ebay browser', 60000, () => openSoldClient(config))
@@ -592,9 +592,11 @@ const COMMANDS = {
   async run (args = []) {
     const limIdx = args.indexOf('--limit')
     const limit = limIdx !== -1 ? Number(args[limIdx + 1]) : 8
+    const parIdx = args.indexOf('--parallel')
+    const parallel = parIdx !== -1 ? Number(args[parIdx + 1]) : 3
     const { config, repo, browse } = buildContext()
     const llm = createLlm()
-    const notifier = createTelegramNotifier()
+    const notifier = createTelegramNotifier({ operational: config.alerts?.operational ?? 'critical' })
     const { sold, browse: bBrowse, close } = await openSoldClient(config)
     const browseClient = await pickBrowse(browse, bBrowse)
 
@@ -611,24 +613,36 @@ const COMMANDS = {
     const pacer = createPacer({ config: config.pace })
     const source = createFacebookSource({ session, pacer })
 
-    console.log(`fbay running. ${repo.listWatches({ enabledOnly: true }).length} watches, up to ${limit} listings evaluated per pass.`)
+    console.log(`fbay running. ${repo.listWatches({ enabledOnly: true }).length} watches, up to ${limit} listings per pass, ${parallel} at a time.`)
     console.log('ctrl-c to stop.\n')
-    await notifier.notifyAlert(`Monitor started: ${repo.listWatches({ enabledOnly: true }).map((w) => w.name).join(', ')}`)
+
     await runLoop({
       repo,
       config,
       notifier,
-      runOne: (watch) => runWatch({
-        watch, source, repo, config, sold, browse: browseClient, notifier, limit,
-        identifier: ({ listing }) => identify({ listing, repo, llm, config }),
-        onProgress: ({ phase, evaluation, listing, index, total }) => {
-          if (phase === 'detail' || !evaluation) return
-          const tag = evaluation.ok
-            ? (evaluation.passed ? `DEAL net ${money(evaluation.profit.netCents)}` : `pass (${evaluation.rejections[0]?.rule ?? 'filtered'})`)
-            : 'needs review'
-          console.log(`  [${new Date().toISOString().slice(11, 19)}] ${index}/${total} ${money(listing.priceCents)} ${listing.title.slice(0, 38)} -> ${tag}`)
-        },
-      }),
+      watchConcurrency: parallel,
+      runOne: async (watch) => {
+        // Each watch gets its own page so concurrent scans cannot navigate
+        // each other mid-parse. The context, and therefore the login, is shared.
+        const view = await session.openView()
+        const watchSource = createFacebookSource({ session: view, pacer })
+        try {
+          return await runWatch({
+            watch, source: watchSource, repo, config, sold, browse: browseClient, notifier, limit,
+            concurrency: parallel,
+            identifier: ({ listing }) => identify({ listing, repo, llm, config }),
+            onProgress: ({ phase, evaluation, listing }) => {
+              if (phase === 'detail' || !evaluation) return
+              const tag = evaluation.ok
+                ? (evaluation.passed ? `DEAL net ${money(evaluation.profit.netCents)}` : `pass (${evaluation.rejections[0]?.rule ?? 'filtered'})`)
+                : 'needs review'
+              console.log(`  [${new Date().toISOString().slice(11, 19)}] ${watch.name.padEnd(12)} ${money(listing.priceCents).padStart(8)} ${listing.title.slice(0, 34)} -> ${tag}`)
+            },
+          })
+        } finally {
+          await view.close()
+        }
+      },
     })
     await session.close()
     await close()
@@ -666,7 +680,7 @@ watches
   fbay watch add --name X --city nyc --query "macbook" --max 900
   fbay watch list | enable <n> | disable <n> | rm <n>
   fbay scan [--watch X] [--limit N]  one pass now (--dry to just list)
-  fbay run [--limit N]          continuous, alerts to Telegram (default 8/pass)
+  fbay run [--limit N] [--parallel N]  continuous, alerts to Telegram
 
 maintenance
   fbay db stats | prune [days]`

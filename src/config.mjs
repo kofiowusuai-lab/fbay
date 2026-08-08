@@ -40,6 +40,10 @@ export const DEFAULTS = {
     // Surface borderline finds so silence is never ambiguous.
     nearMisses: true,
     minNetProfitCents: 2000,
+    // 'critical' sends only broken-scraper / blocked-account warnings.
+    // 'none' silences those too, at the cost of a dead monitor looking
+    // identical to a quiet market. 'all' includes routine status.
+    operational: 'critical',
   },
   blacklist: {
     // Universal traps: things that read like a bargain and are worth nothing.

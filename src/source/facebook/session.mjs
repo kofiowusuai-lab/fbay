@@ -57,7 +57,50 @@ export async function openSession ({
   })
   const page = context.pages()[0] ?? (await context.newPage())
 
+  /**
+   * A page-scoped view of the same browser context. Concurrent scans need
+   * separate pages - two watches calling goto() on one page would navigate each
+   * other mid-parse. The context (and therefore the login) is shared, and the
+   * pacer stays shared too, so concurrency raises throughput without raising
+   * the request rate Facebook sees.
+   */
+  function viewFor (p) {
+    return {
+      page: p,
+      async close () { if (p !== page) await p.close().catch(() => {}) },
+      async goto (url, opts) { return gotoOn(p, url, opts) },
+      async extractNodes () { return p.evaluate(EXTRACT_NODES_FN) },
+      async extractDetail () { return p.evaluate(EXTRACT_DETAIL_FN) },
+      async scroll (times = 3, pauseMs = 1200) {
+        for (let i = 0; i < times; i++) {
+          await p.evaluate(() => window.scrollBy(0, window.innerHeight * 0.9))
+          await p.waitForTimeout(pauseMs)
+        }
+      },
+    }
+  }
+
+  async function gotoOn (p, url, { waitMs = 2500, timeout = 45000 } = {}) {
+    try {
+      await p.goto(url, { waitUntil: 'domcontentloaded', timeout })
+      await p.waitForTimeout(waitMs)
+      const bodyText = await p.evaluate(() => document.body.innerText.slice(0, 4000))
+      return { ok: true, url: p.url(), bodyText, block: detectBlock({ url: p.url(), bodyText }) }
+    } catch (e) {
+      return {
+        ok: false,
+        url,
+        bodyText: '',
+        block: { blocked: false, kind: null },
+        error: `navigation failed: ${String(e.message ?? e).split('\n')[0].slice(0, 120)}`,
+      }
+    }
+  }
+
   return {
+    /** An isolated page so parallel scans cannot navigate each other. */
+    async openView () { return viewFor(await context.newPage()) },
+
     context,
     page,
     async close () { await context.close() },
@@ -68,22 +111,7 @@ export async function openSession ({
      * and Marketplace item pages are heavy enough that occasional timeouts are
      * normal rather than exceptional.
      */
-    async goto (url, { waitMs = 2500, timeout = 45000 } = {}) {
-      try {
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
-        await page.waitForTimeout(waitMs)
-        const bodyText = await page.evaluate(() => document.body.innerText.slice(0, 4000))
-        return { ok: true, url: page.url(), bodyText, block: detectBlock({ url: page.url(), bodyText }) }
-      } catch (e) {
-        return {
-          ok: false,
-          url,
-          bodyText: '',
-          block: { blocked: false, kind: null },
-          error: `navigation failed: ${String(e.message ?? e).split('\n')[0].slice(0, 120)}`,
-        }
-      }
-    },
+    async goto (url, opts) { return gotoOn(page, url, opts) },
 
     /**
      * The `c_user` cookie is Facebook's canonical logged-in marker and holds the

@@ -113,10 +113,10 @@ test('a photo send failure falls back to a text message rather than losing the a
   assert.match(calls[1], /sendMessage/)
 })
 
-test('notifyAlert sends an operational warning', async () => {
+test('notifyAlert sends a critical operational warning', async () => {
   const calls = []
   const n = createTelegramNotifier({ token: 't', chatId: '1', fetchImpl: async (u, o) => { calls.push(JSON.parse(o.body)); return { ok: true, json: async () => ({ ok: true }) } } })
-  await n.notifyAlert('eBay sold parser returned zero results')
+  await n.notifyAlert('eBay sold parser returned zero results', { level: 'critical' })
   assert.match(calls[0].text, /parser returned zero/)
 })
 
@@ -148,7 +148,7 @@ test('a transient network failure is retried and can succeed', async () => {
       return { ok: true, json: async () => ({ ok: true }) }
     },
   })
-  const r = await notifier.notifyAlert('x')
+  const r = await notifier.notifyAlert('x', { level: 'critical' })
   assert.equal(r.ok, true)
   assert.equal(n, 3)
 })
@@ -159,7 +159,7 @@ test('a 4xx is not retried - retrying a misconfiguration wastes time', async () 
     token: 't', chatId: '1', retries: 3, sleepImpl: async () => {},
     fetchImpl: async () => { calls++; return { ok: false, status: 403, text: async () => 'bot cannot message the bot' } },
   })
-  const r = await notifier.notifyAlert('x')
+  const r = await notifier.notifyAlert('x', { level: 'critical' })
   assert.equal(r.ok, false)
   assert.equal(calls, 1)
   assert.match(r.error, /403/)
@@ -175,7 +175,7 @@ test('a 5xx is retried', async () => {
       return { ok: true, json: async () => ({ ok: true }) }
     },
   })
-  assert.equal((await notifier.notifyAlert('x')).ok, true)
+  assert.equal((await notifier.notifyAlert('x', { level: 'critical' })).ok, true)
   assert.equal(calls, 3)
 })
 
@@ -186,4 +186,33 @@ test('a near-miss card is labelled and states the single failed check', () => {
   assert.match(text, /not a buy/)
   assert.match(text, /sell-through 12%/)
   assert.ok(typeof n.notifyNearMiss === 'function')
+})
+
+test('routine operational messages are suppressed by default', async () => {
+  const calls = []
+  const n = createTelegramNotifier({ token: 't', chatId: '1', fetchImpl: async (u, o) => { calls.push(o); return { ok: true, json: async () => ({}) } } })
+  const r = await n.notifyAlert('scanning watch 3 of 15')
+  assert.equal(r.skipped, true)
+  assert.equal(calls.length, 0, 'the deals chat must not fill with status')
+})
+
+test('critical operational messages still get through', async () => {
+  const calls = []
+  const n = createTelegramNotifier({ token: 't', chatId: '1', fetchImpl: async (u, o) => { calls.push(o); return { ok: true, json: async () => ({}) } } })
+  await n.notifyAlert('canary failure - parser returned zero results', { level: 'critical' })
+  assert.equal(calls.length, 1, 'a broken scraper must never be silent')
+})
+
+test("operational: 'none' silences even critical warnings", async () => {
+  const calls = []
+  const n = createTelegramNotifier({ token: 't', chatId: '1', operational: 'none', fetchImpl: async (u, o) => { calls.push(o); return { ok: true, json: async () => ({}) } } })
+  await n.notifyAlert('blocked', { level: 'critical' })
+  assert.equal(calls.length, 0)
+})
+
+test('deals are never suppressed by the operational setting', async () => {
+  const calls = []
+  const n = createTelegramNotifier({ token: 't', chatId: '1', operational: 'none', fetchImpl: async (u, o) => { calls.push(o); return { ok: true, json: async () => ({}) } } })
+  await n.notifyDeal({ ...DEAL, listing: { ...DEAL.listing, imageUrls: [] } })
+  assert.equal(calls.length, 1, 'the whole point of the chat')
 })

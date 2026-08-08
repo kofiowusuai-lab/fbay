@@ -75,7 +75,7 @@ export async function runAllCanaries ({ sold, repo, notifier, now = Date.now(), 
   for (const c of CANARIES) results.push(await runCanary({ canary: c, sold, repo, now, expectedCurrency }))
   const failed = results.filter((r) => !r.ok)
   if (failed.length && notifier) {
-    await notifier.notifyAlert(`canary failure - ${failed.map((f) => `${f.name}: ${f.reason}`).join(' | ')}`)
+    await notifier.notifyAlert(`canary failure - ${failed.map((f) => `${f.name}: ${f.reason}`).join(' | ')}`, { level: 'critical' })
   }
   return { ok: failed.length === 0, results, failed }
 }

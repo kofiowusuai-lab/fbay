@@ -1,3 +1,5 @@
+import { mapPool } from './pool.mjs'
+
 export function isQuietHour (hour, { start, end }) {
   if (start === end) return false
   return start < end ? hour >= start && hour < end : hour >= start || hour < end
@@ -27,6 +29,7 @@ export async function runLoop ({
   tickMs = 5 * 60000,
   shouldContinue = () => true,
   logger = console,
+  watchConcurrency = 1,
 }) {
   while (shouldContinue()) {
     const now = clock()
@@ -44,7 +47,10 @@ export async function runLoop ({
       continue
     }
 
-    for (const watch of due) {
+    // Watches run concurrently, each on its own browser page. The pacer is
+    // shared, so this raises throughput without raising the request rate
+    // Facebook sees - which is the constraint that actually matters.
+    const outcomes = await mapPool(due, watchConcurrency, async (watch) => {
       // One watch failing must not end the loop - the next watch, and the next
       // pass, may be perfectly healthy.
       let r
@@ -54,10 +60,14 @@ export async function runLoop ({
         r = { ok: false, error: `unhandled: ${String(e.message ?? e).split('\n')[0].slice(0, 140)}` }
       }
       logger.log(`[${watch.name}] ${r.ok ? `${r.listingsSeen} seen, ${r.listingsNew} new, ${r.dealsFound} deals` : `failed: ${r.error}`}`)
-      if (!r.ok && r.kind) {
-        await notifier.notifyAlert(`scan halted on watch "${watch.name}": ${r.error}`)
-        break
-      }
+      return { watch, r }
+    })
+
+    // A block is account-level, not watch-level: if one scan was blocked the
+    // others are running into the same wall, so surface it once and stop.
+    const blocked = outcomes.map((o) => o.value).find((v) => v && !v.r.ok && v.r.kind)
+    if (blocked) {
+      await notifier.notifyAlert(`scan halted on "${blocked.watch.name}": ${blocked.r.error}`, { level: 'critical' })
     }
 
     await sleepImpl(jitterMs(tickMs))

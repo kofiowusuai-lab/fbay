@@ -89,6 +89,7 @@ export function createTelegramNotifier ({
   retries = 3,
   timeoutMs = 15000,
   sleepImpl = (ms) => new Promise((r) => setTimeout(r, ms)),
+  operational = 'critical',
 } = {}) {
   const configured = Boolean(token && chatId)
   const api = (method) => `https://api.telegram.org/bot${token}/${method}`
@@ -144,8 +145,17 @@ export function createTelegramNotifier ({
     })
   }
 
-  async function notifyAlert (message) {
+  /**
+   * Operational messages, NOT deals. These are noise in a chat the operator
+   * only wants to open when there is something to buy, so routine ones are off
+   * by default and only `critical` gets through - a broken scraper or a blocked
+   * account, where silence would otherwise be indistinguishable from a quiet
+   * market.
+   */
+  async function notifyAlert (message, { level = 'routine' } = {}) {
     if (!configured) return { ok: false, error: 'telegram not configured' }
+    if (operational === 'none') return { ok: true, skipped: true }
+    if (operational === 'critical' && level !== 'critical') return { ok: true, skipped: true }
     return send('sendMessage', { chat_id: chatId, text: escapeHtml(`FBAY: ${message}`), parse_mode: 'HTML' })
   }
 

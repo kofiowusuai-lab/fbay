@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isQuietHour, dueWatches, jitterMs } from '../src/watch/schedule.mjs'
+import { isQuietHour, dueWatches, jitterMs, runLoop } from '../src/watch/schedule.mjs'
 
 test('quiet hours wrapping midnight are handled', () => {
   const q = { start: 23, end: 7 }
@@ -50,4 +50,70 @@ test('jitter stays within the requested fraction', () => {
     const j = jitterMs(60000, 0.25, () => r)
     assert.ok(j >= 45000 && j <= 75000)
   }
+})
+
+test('watches run concurrently up to the configured limit', async () => {
+  let inFlight = 0
+  let peak = 0
+  const repo = {
+    listWatches: () => Array.from({ length: 6 }, (_, i) => ({ name: `w${i}`, enabled: 1, interval_minutes: 1, last_run_at: null })),
+  }
+  let ticks = 0
+  await runLoop({
+    repo,
+    config: { quietHours: { start: 0, end: 0 } },
+    notifier: { notifyAlert: async () => {} },
+    watchConcurrency: 3,
+    clock: () => 1e9,
+    sleepImpl: async () => {},
+    shouldContinue: () => ticks++ < 1,
+    logger: { log: () => {} },
+    runOne: async () => {
+      peak = Math.max(peak, ++inFlight)
+      await new Promise((r) => setTimeout(r, 10))
+      inFlight--
+      return { ok: true, listingsSeen: 1, listingsNew: 1, dealsFound: 0 }
+    },
+  })
+  assert.equal(peak, 3, `expected 3 concurrent watches, peaked at ${peak}`)
+})
+
+test('a blocked scan alerts once, not once per concurrent watch', async () => {
+  const alerts = []
+  const repo = { listWatches: () => Array.from({ length: 4 }, (_, i) => ({ name: `w${i}`, enabled: 1, interval_minutes: 1, last_run_at: null })) }
+  let ticks = 0
+  await runLoop({
+    repo,
+    config: { quietHours: { start: 0, end: 0 } },
+    notifier: { notifyAlert: async (m) => alerts.push(m) },
+    watchConcurrency: 4,
+    clock: () => 1e9,
+    sleepImpl: async () => {},
+    shouldContinue: () => ticks++ < 1,
+    logger: { log: () => {} },
+    runOne: async () => ({ ok: false, kind: 'checkpoint', error: 'facebook blocked us' }),
+  })
+  assert.equal(alerts.length, 1, 'a block is account-level; alerting four times is noise')
+})
+
+test('one throwing watch does not stop the others', async () => {
+  const done = []
+  const repo = { listWatches: () => [1, 2, 3].map((i) => ({ name: `w${i}`, enabled: 1, interval_minutes: 1, last_run_at: null })) }
+  let ticks = 0
+  await runLoop({
+    repo,
+    config: { quietHours: { start: 0, end: 0 } },
+    notifier: { notifyAlert: async () => {} },
+    watchConcurrency: 3,
+    clock: () => 1e9,
+    sleepImpl: async () => {},
+    shouldContinue: () => ticks++ < 1,
+    logger: { log: () => {} },
+    runOne: async (w) => {
+      if (w.name === 'w2') throw new Error('boom')
+      done.push(w.name)
+      return { ok: true, listingsSeen: 0, listingsNew: 0, dealsFound: 0 }
+    },
+  })
+  assert.deepEqual(done.sort(), ['w1', 'w3'])
 })
