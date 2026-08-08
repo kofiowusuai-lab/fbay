@@ -73,3 +73,19 @@ export function applyFilters ({ listing, identity, compset, profit }, config) {
 
   return { passed: rejections.length === 0, rejections }
 }
+
+/**
+ * A near miss failed exactly one rule while still showing a real profit.
+ *
+ * Silence is not the same as safety. A monitor that only ever speaks on a
+ * perfect deal leaves the operator unable to tell "the market is thin" from
+ * "the thresholds are wrong" from "the scraper broke", so borderline finds are
+ * surfaced too - labelled, with the one reason they failed, and never as a buy
+ * recommendation.
+ */
+export function isNearMiss ({ rejections, profit }, { minNetProfitCents = 0 } = {}) {
+  if (!rejections || rejections.length !== 1) return false
+  if (profit?.netCents == null || profit.netCents < minNetProfitCents) return false
+  // A blacklisted title or an over-ceiling ask is a hard no, not a near miss.
+  return !['blacklist_keyword', 'blacklist_seller', 'max_ask', 'freight_disabled'].includes(rejections[0].rule)
+}

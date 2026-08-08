@@ -1,6 +1,6 @@
 import { getCompSet } from '../comps/index.mjs'
 import { computeProfit } from '../economics/profit.mjs'
-import { applyFilters, prefilter } from '../score/filters.mjs'
+import { applyFilters, prefilter, isNearMiss } from '../score/filters.mjs'
 import { scoreDeal } from '../score/rank.mjs'
 
 /**
@@ -59,6 +59,7 @@ export async function runWatch ({
   let listingsSeen = 0
   let listingsNew = 0
   let dealsFound = 0
+  let nearMisses = 0
 
   const scan = await source.scan(watch, { fetchDetails, limit, onProgress })
   if (!scan.ok) {
@@ -127,13 +128,29 @@ export async function runWatch ({
 
     onProgress?.({ index, total: queue.length, listing, evaluation: ev })
 
+    if (!ev.passed && config.alerts?.nearMisses && isNearMiss(ev, config.alerts)) {
+      nearMisses++
+      const comps = ev.compsetId ? repo.compsFor(ev.compsetId) : []
+      await notifier.notifyNearMiss?.({
+        listing, identity: ev.identity, compset: ev.compset,
+        profit: ev.profit, score: ev.score, rejections: ev.rejections, comps,
+      })
+    }
+
     if (ev.passed) {
       dealsFound++
-      await notifier.notifyDeal({ listing, identity: ev.identity, compset: ev.compset, profit: ev.profit, score: ev.score, priceDrop })
+      // The individual sold listings are the evidence for the valuation. Send
+      // them, so the alert can be acted on from a phone without trusting a
+      // bare median.
+      const comps = ev.compsetId ? repo.compsFor(ev.compsetId) : []
+      await notifier.notifyDeal({
+        listing, identity: ev.identity, compset: ev.compset,
+        profit: ev.profit, score: ev.score, priceDrop, comps,
+      })
     }
   }
 
   if (watch.id) repo.touchWatch(watch.id, now)
   repo.finishRun(runId, { now, listingsSeen, listingsNew, dealsFound, errors, status: 'ok' })
-  return { ok: true, runId, listingsSeen, listingsNew, dealsFound, errors }
+  return { ok: true, runId, listingsSeen, listingsNew, dealsFound, nearMisses, errors }
 }

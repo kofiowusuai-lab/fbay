@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { applyFilters, prefilter } from '../src/score/filters.mjs'
+import { applyFilters, prefilter, isNearMiss } from '../src/score/filters.mjs'
 
 const applyPre = (listing) => prefilter(listing, DEFAULTS)
 import { scoreDeal, saturate } from '../src/score/rank.mjs'
@@ -116,4 +116,26 @@ test('prefilter rejects an ask above the ceiling', () => {
 
 test('prefilter passes a plausible listing through', () => {
   assert.equal(applyPre({ title: 'DeWalt DCD791 drill', priceCents: 6000 }).rejected, false)
+})
+
+test('a near miss is one failed rule with real profit', () => {
+  const ev = { rejections: [{ rule: 'min_sell_through', reason: 'low' }], profit: { netCents: 4000 } }
+  assert.equal(isNearMiss(ev, { minNetProfitCents: 2000 }), true)
+})
+
+test('two failed rules is not a near miss', () => {
+  const ev = { rejections: [{ rule: 'min_roi' }, { rule: 'min_sell_through' }], profit: { netCents: 4000 } }
+  assert.equal(isNearMiss(ev, { minNetProfitCents: 2000 }), false)
+})
+
+test('a loss is never a near miss however few rules it failed', () => {
+  const ev = { rejections: [{ rule: 'min_net_profit' }], profit: { netCents: -500 } }
+  assert.equal(isNearMiss(ev, { minNetProfitCents: 2000 }), false)
+})
+
+test('a hard no is never softened into a near miss', () => {
+  for (const rule of ['blacklist_keyword', 'max_ask', 'freight_disabled']) {
+    const ev = { rejections: [{ rule }], profit: { netCents: 9000 } }
+    assert.equal(isNearMiss(ev, { minNetProfitCents: 2000 }), false, rule)
+  }
 })

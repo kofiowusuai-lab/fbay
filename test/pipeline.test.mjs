@@ -78,10 +78,16 @@ test('a full pipeline pass turns one fixture listing into an alerted deal', asyn
   assert.equal(stored.net_profit_cents, alert.profit.netCents)
   assert.equal(stored.breakeven_buy_cents, alert.profit.breakevenBuyCents)
 
-  // The card must render without throwing and must lead with the offer ceiling.
-  const card = formatDealCard(alert)
-  assert.match(card, /Offer up to/)
+  // The card must render without throwing, lead with the offer ceiling, and
+  // carry the links the alert is actually acted on from: the Facebook listing
+  // and real sold eBay comps.
+  const comps = repo.compsFor(stored.compset_id)
+  const card = formatDealCard({ ...alert, comps })
+  assert.match(card, /OFFER UP TO/)
   assert.match(card, /iPhone 13/)
+  assert.match(card, /BUY ON FACEBOOK/, 'the buy link must be present')
+  assert.match(card, /Sell on eBay around/, 'the recommended sell price must be present')
+  assert.match(card, /Recently sold:/, 'comparable sold listings are the evidence for the median')
 })
 
 test('the same run twice produces exactly one alert', async () => {

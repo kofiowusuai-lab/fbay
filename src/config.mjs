@@ -35,6 +35,11 @@ export const DEFAULTS = {
     detailFetchRatio: 0.35,
   },
   quietHours: { start: 23, end: 7 },
+  alerts: {
+    // Surface borderline finds so silence is never ambiguous.
+    nearMisses: true,
+    minNetProfitCents: 2000,
+  },
   blacklist: {
     // Universal traps: things that read like a bargain and are worth nothing.
     // Applied as a pre-filter, before any model call, so they cost nothing.

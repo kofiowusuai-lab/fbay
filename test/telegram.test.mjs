@@ -1,10 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatDealCard, createTelegramNotifier, escapeMd } from '../src/notify/telegram.mjs'
+import { formatDealCard, createTelegramNotifier, escapeHtml, pickEvidence } from '../src/notify/telegram.mjs'
 
 const DEAL = {
   listing: { title: 'MacBook Air 13 2019', priceCents: 12000, url: 'https://fb/1', city: 'Brooklyn, NY', imageUrls: ['https://img/1.jpg'] },
-  identity: { brand: 'Apple', model: 'MacBook Air', variant: '13', capacity: '256GB', condition: 'good', identityConfidence: 0.9, category: 'laptop' },
+  identity: { brand: 'Apple', model: 'MacBook Air', variant: '13', capacity: '256GB', condition: 'good', identityConfidence: 0.9, category: 'laptop', query: 'apple macbook air 13 256gb' },
   compset: { trimmedMedianCents: 30000, p25Cents: 28000, p75Cents: 32000, sampleN: 10, activeCount: 12, sellThrough: 0.45, confidence: 0.8 },
   profit: { netCents: 11945, roi: 0.995, breakevenBuyCents: 23945, shippingCents: 1650, fvfCents: 3975, perOrderCents: 30, promotedCents: 0, bufferCents: 1500 },
   score: 0.72,
@@ -15,31 +15,70 @@ const DEAL = {
 // text would pass against a card that Telegram then rejects with a 400.
 test('the card leads with the offer ceiling, because that is the actionable number', () => {
   const text = formatDealCard(DEAL)
-  const firstNumberLine = text.split('\n').find((l) => /\$/.test(l))
-  assert.match(firstNumberLine, /Offer up to/i)
-  assert.match(firstNumberLine, /\$239\\\.45/)
+  const firstBold = text.split('\n').find((l) => /OFFER UP TO/.test(l))
+  assert.ok(firstBold, 'the offer ceiling must be present')
+  assert.match(firstBold, /\$239\.45/)
 })
 
-test('the card includes net, roi, sell-through and comp count', () => {
+test('the card states the eBay sell price and the comp count', () => {
   const text = formatDealCard(DEAL)
-  assert.match(text, /\$119\\\.45/)
-  assert.match(text, /100%/)          // roi
-  assert.match(text, /45%/)           // sell-through
-  assert.match(text, /10 comps/)
+  assert.match(text, /Sell on eBay around \$300\.00/)
+  assert.match(text, /10 sold/)
+  assert.match(text, /45%/)
 })
 
-test('the card includes the listing link', () => {
-  assert.match(formatDealCard(DEAL), /https:\/\/fb\/1/)
+test('the card carries a clickable Facebook buy link', () => {
+  const text = formatDealCard(DEAL)
+  assert.match(text, /<a href="https:\/\/fb\/1">/)
+  assert.match(text, /BUY ON FACEBOOK/)
+})
+
+test('the card includes real sold eBay listings as evidence', () => {
+  const comps = [
+    { included: 1, url: 'https://ebay.com/itm/1', title: 'Apple MacBook Air M1 256GB', price_cents: 30100, sold_at: Date.UTC(2026, 6, 1) },
+    { included: 1, url: 'https://ebay.com/itm/2', title: 'Apple MacBook Air M1 256GB Gold', price_cents: 29900, sold_at: Date.UTC(2026, 6, 5) },
+    { included: 1, url: 'https://ebay.com/itm/3', title: 'Apple MacBook Air M1 256GB Silver', price_cents: 30500, sold_at: Date.UTC(2026, 6, 9) },
+    { included: 0, url: 'https://ebay.com/itm/4', title: 'Lot of 3 MacBook', price_cents: 90000, sold_at: null },
+  ]
+  const text = formatDealCard({ ...DEAL, comps })
+  assert.match(text, /Recently sold:/)
+  assert.match(text, /ebay\.com\/itm\/1/)
+  assert.match(text, /ebay\.com\/itm\/2/)
+  assert.match(text, /ebay\.com\/itm\/3/)
+  assert.ok(!text.includes('itm/4'), 'excluded comps are not evidence')
+})
+
+test('evidence is the comps nearest the median, capped at three', () => {
+  const comps = Array.from({ length: 10 }, (_, i) => ({
+    included: 1, url: `https://ebay.com/itm/${i}`, title: `comp ${i}`,
+    price_cents: 20000 + i * 2500, sold_at: null,
+  }))
+  const picked = pickEvidence(comps, 30000)
+  assert.equal(picked.length, 3)
+  for (const p of picked) assert.ok(Math.abs(p.price_cents - 30000) <= 5000, 'far outliers are poor evidence')
+})
+
+test('the card links an eBay sold search so the median can be checked', () => {
+  const text = formatDealCard(DEAL)
+  assert.match(text, /LH_Sold=1/)
+  assert.match(text, /see all sold on eBay/)
 })
 
 test('a price drop is called out', () => {
   const text = formatDealCard({ ...DEAL, priceDrop: { previousPriceCents: 20000, currentPriceCents: 12000 } })
   assert.match(text, /dropped/i)
-  assert.match(text, /\$200\\\.00/)
+  assert.match(text, /\$200\.00/)
 })
 
-test('escapeMd escapes MarkdownV2 reserved characters', () => {
-  assert.equal(escapeMd('a-b.c(d)'), 'a\\-b\\.c\\(d\\)')
+test('html special characters in listing text cannot break the message', () => {
+  // A raw < from a seller's title would make Telegram reject the whole message
+  // with a 400, losing the alert entirely.
+  const text = formatDealCard({
+    ...DEAL,
+    identity: { ...DEAL.identity, brand: null, model: null, variant: null, capacity: null },
+    listing: { ...DEAL.listing, title: 'Drill <b>& "best"</b> deal' },
+  })
+  assert.match(text, /Drill &lt;b&gt;&amp; "best"&lt;\/b&gt; deal/)
 })
 
 test('the notifier sends a photo when an image is available', async () => {
@@ -48,6 +87,7 @@ test('the notifier sends a photo when an image is available', async () => {
   await n.notifyDeal(DEAL)
   assert.match(calls[0].u, /sendPhoto/)
   assert.equal(JSON.parse(calls[0].o.body).photo, 'https://img/1.jpg')
+  assert.match(calls[1].u, /sendMessage/, 'the full card follows as its own message, uncapped by the caption limit')
 })
 
 test('the notifier falls back to sendMessage with no image', async () => {
@@ -137,4 +177,13 @@ test('a 5xx is retried', async () => {
   })
   assert.equal((await notifier.notifyAlert('x')).ok, true)
   assert.equal(calls, 3)
+})
+
+test('a near-miss card is labelled and states the single failed check', () => {
+  const n = createTelegramNotifier({ token: 't', chatId: '1', fetchImpl: async () => ({ ok: true, json: async () => ({}) }) })
+  const text = formatDealCard({ ...DEAL, nearMiss: 'sell-through 12% below floor 35%' })
+  assert.match(text, /NEAR MISS/)
+  assert.match(text, /not a buy/)
+  assert.match(text, /sell-through 12%/)
+  assert.ok(typeof n.notifyNearMiss === 'function')
 })
