@@ -544,7 +544,9 @@ const COMMANDS = {
     process.exitCode = checks.every((c) => c.ok) ? 0 : 1
   },
 
-  async run () {
+  async run (args = []) {
+    const limIdx = args.indexOf('--limit')
+    const limit = limIdx !== -1 ? Number(args[limIdx + 1]) : 8
     const { config, repo, browse } = buildContext()
     const llm = createLlm()
     const notifier = createTelegramNotifier()
@@ -564,14 +566,23 @@ const COMMANDS = {
     const pacer = createPacer({ config: config.pace })
     const source = createFacebookSource({ session, pacer })
 
-    console.log('fbay running. ctrl-c to stop.')
+    console.log(`fbay running. ${repo.listWatches({ enabledOnly: true }).length} watches, up to ${limit} listings evaluated per pass.`)
+    console.log('ctrl-c to stop.\n')
+    await notifier.notifyAlert(`Monitor started: ${repo.listWatches({ enabledOnly: true }).map((w) => w.name).join(', ')}`)
     await runLoop({
       repo,
       config,
       notifier,
       runOne: (watch) => runWatch({
-        watch, source, repo, config, sold, browse: browseClient, notifier,
+        watch, source, repo, config, sold, browse: browseClient, notifier, limit,
         identifier: ({ listing }) => identify({ listing, repo, llm, config }),
+        onProgress: ({ phase, evaluation, listing, index, total }) => {
+          if (phase === 'detail' || !evaluation) return
+          const tag = evaluation.ok
+            ? (evaluation.passed ? `DEAL net ${money(evaluation.profit.netCents)}` : `pass (${evaluation.rejections[0]?.rule ?? 'filtered'})`)
+            : 'needs review'
+          console.log(`  [${new Date().toISOString().slice(11, 19)}] ${index}/${total} ${money(listing.priceCents)} ${listing.title.slice(0, 38)} -> ${tag}`)
+        },
       }),
     })
     await session.close()
@@ -609,7 +620,7 @@ watches
   fbay watch add --name X --city nyc --query "macbook" --max 900
   fbay watch list | enable <n> | disable <n> | rm <n>
   fbay scan [--watch X] [--limit N]  one pass now (--dry to just list)
-  fbay run                      continuous, alerts to Telegram
+  fbay run [--limit N]          continuous, alerts to Telegram (default 8/pass)
 
 maintenance
   fbay db stats | prune [days]`

@@ -86,3 +86,55 @@ test('a missing token disables the notifier instead of crashing the run', async 
   assert.equal(r.ok, false)
   assert.match(r.error, /not configured/)
 })
+
+test('a network failure returns an error instead of throwing', async () => {
+  // A throw here would propagate out of notifyDeal and kill the monitor loop.
+  const n = createTelegramNotifier({
+    token: 't', chatId: '1', retries: 1, sleepImpl: async () => {},
+    fetchImpl: async () => { throw new Error('ETIMEDOUT 149.154.166.110:443') },
+  })
+  const r = await n.notifyDeal({ ...DEAL, listing: { ...DEAL.listing, imageUrls: [] } })
+  assert.equal(r.ok, false)
+  assert.match(r.error, /unreachable/)
+  assert.match(r.error, /ETIMEDOUT/)
+})
+
+test('a transient network failure is retried and can succeed', async () => {
+  let n = 0
+  const notifier = createTelegramNotifier({
+    token: 't', chatId: '1', retries: 3, sleepImpl: async () => {},
+    fetchImpl: async () => {
+      if (++n < 3) throw new Error('ETIMEDOUT')
+      return { ok: true, json: async () => ({ ok: true }) }
+    },
+  })
+  const r = await notifier.notifyAlert('x')
+  assert.equal(r.ok, true)
+  assert.equal(n, 3)
+})
+
+test('a 4xx is not retried - retrying a misconfiguration wastes time', async () => {
+  let calls = 0
+  const notifier = createTelegramNotifier({
+    token: 't', chatId: '1', retries: 3, sleepImpl: async () => {},
+    fetchImpl: async () => { calls++; return { ok: false, status: 403, text: async () => 'bot cannot message the bot' } },
+  })
+  const r = await notifier.notifyAlert('x')
+  assert.equal(r.ok, false)
+  assert.equal(calls, 1)
+  assert.match(r.error, /403/)
+})
+
+test('a 5xx is retried', async () => {
+  let calls = 0
+  const notifier = createTelegramNotifier({
+    token: 't', chatId: '1', retries: 2, sleepImpl: async () => {},
+    fetchImpl: async () => {
+      calls++
+      if (calls < 3) return { ok: false, status: 502, text: async () => 'bad gateway' }
+      return { ok: true, json: async () => ({ ok: true }) }
+    },
+  })
+  assert.equal((await notifier.notifyAlert('x')).ok, true)
+  assert.equal(calls, 3)
+})

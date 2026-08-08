@@ -37,18 +37,39 @@ export function createTelegramNotifier ({
   token = process.env.TELEGRAM_BOT_TOKEN,
   chatId = process.env.TELEGRAM_CHAT_ID,
   fetchImpl = globalThis.fetch,
+  retries = 3,
+  timeoutMs = 15000,
+  sleepImpl = (ms) => new Promise((r) => setTimeout(r, ms)),
 } = {}) {
   const configured = Boolean(token && chatId)
   const api = (method) => `https://api.telegram.org/bot${token}/${method}`
 
-  async function send (method, body) {
-    const res = await fetchImpl(api(method), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    if (!res.ok) return { ok: false, error: `telegram ${method} failed: ${res.status} ${await res.text()}` }
-    return { ok: true }
+  /**
+   * Network failures must NOT throw. This runs inside the monitor loop, so an
+   * unreachable Telegram (a dropped connection at 3am, an ISP hiccup) would
+   * otherwise take down the whole run and lose the deal that triggered it.
+   * A missed alert is recoverable; a dead monitor is not.
+   */
+  async function send (method, body, { attempt = 0 } = {}) {
+    try {
+      const res = await fetchImpl(api(method), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(timeoutMs),
+      })
+      if (res.ok) return { ok: true }
+      const detail = `telegram ${method} failed: ${res.status} ${(await res.text()).slice(0, 160)}`
+      // 4xx is a configuration problem; retrying will not help.
+      if (res.status < 500 || attempt >= retries) return { ok: false, error: detail }
+      await sleepImpl(1000 * 2 ** attempt)
+      return send(method, body, { attempt: attempt + 1 })
+    } catch (e) {
+      const detail = `telegram ${method} unreachable: ${e.message ?? String(e)}`
+      if (attempt >= retries) return { ok: false, error: detail }
+      await sleepImpl(1000 * 2 ** attempt)
+      return send(method, body, { attempt: attempt + 1 })
+    }
   }
 
   async function notifyDeal (deal) {
