@@ -53,3 +53,7 @@ button:disabled { opacity: 0.55; cursor: default; }
 .shots img { height: 160px; border-radius: 8px; }
 pre { white-space: pre-wrap; color: var(--dim); font: 13px/1.6 ui-monospace, monospace; }
 .err { background: #2a1618; border: 1px solid #5c2b30; color: #ffb3b3; padding: 14px; border-radius: 10px; }
+
+.rec { display: inline-flex; gap: 4px; align-items: center; }
+.rec input { width: 74px; background: #0a0c0f; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font: inherit; }
+.rec button, td button { padding: 3px 8px; font-size: 12px; }

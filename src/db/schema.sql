@@ -3,6 +3,7 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS watches (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
+  source TEXT NOT NULL DEFAULT 'facebook',
   query TEXT NOT NULL,
   category TEXT,
   city TEXT NOT NULL,
@@ -146,10 +147,12 @@ CREATE TABLE IF NOT EXISTS outcomes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   deal_id INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
   bought_cents INTEGER NOT NULL,
+  listed_cents INTEGER,
   sold_cents INTEGER,
   postage_cents INTEGER,
   fees_cents INTEGER,
   bought_at INTEGER NOT NULL,
+  listed_at INTEGER,
   sold_at INTEGER,
   notes TEXT
 );

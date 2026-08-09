@@ -29,6 +29,7 @@ export default async function Home ({ searchParams }) {
       <div className="sub">Marketplace buys worth flipping, ranked by expected net</div>
 
       <div className="tabs">
+        <Link className="tab" href="/inventory">inventory →</Link>
         {TABS.map((t) => (
           <Link key={t} className="tab" data-on={t === status ? '1' : '0'} href={`/?status=${t}`}>
             {t.replace('_', ' ')} {counts[t] ? `(${counts[t]})` : ''}

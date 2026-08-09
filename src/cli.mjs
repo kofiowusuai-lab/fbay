@@ -11,6 +11,7 @@ import { openEbaySession, createBrowserSoldClient, createBrowserBrowseClient } f
 import { getCompSet } from './comps/index.mjs'
 import { openSession } from './source/facebook/session.mjs'
 import { createFacebookSource } from './source/facebook/index.mjs'
+import { openGumtreeSession, createGumtreeSource } from './source/gumtree/index.mjs'
 import { createPacer } from './source/facebook/pace.mjs'
 import { createLlm, detectAuth } from './llm.mjs'
 import { identify } from './identify/extract.mjs'
@@ -190,13 +191,14 @@ const COMMANDS = {
       const name = flag('name')
       const city = flag('city')
       if (!name || !city) {
-        console.error('usage: fbay watch add --name X --city nyc [--query "..."] [--category electronics] [--min 50] [--max 500] [--radius 40] [--interval 60]')
+        console.error('usage: fbay watch add --name X --city london [--source facebook|gumtree] [--query "..."] [--min 50] [--max 500] [--radius 40] [--interval 60]')
         process.exitCode = 1
         return
       }
       repo.addWatch({
         name,
         city,
+        source: flag('source') ?? 'facebook',
         query: flag('query') ?? '',
         category: flag('category'),
         radiusKm: flag('radius') ? Number(flag('radius')) : 40,
@@ -216,7 +218,7 @@ const COMMANDS = {
     const rows = repo.listWatches()
     if (!rows.length) { console.log('no watches. add one: fbay watch add --name X --city nyc --query "macbook"'); return }
     console.table(rows.map((w) => ({
-      name: w.name, city: w.city, query: w.query || w.category, radius: w.radius_km,
+      name: w.name, src: w.source ?? 'facebook', city: w.city, query: w.query || w.category, radius: w.radius_km,
       max: w.max_price_cents ? money(w.max_price_cents) : '', every: `${w.interval_minutes}m`, enabled: !!w.enabled,
     })))
   },
@@ -510,6 +512,36 @@ const COMMANDS = {
     console.log('when it sells: fbay sold ' + id + ' <sale_price> [postage]')
   },
 
+  async listed (args) {
+    const [id, price] = args
+    if (!id || !price) { console.error('usage: fbay listed <deal_id> <your_asking_price>'); process.exitCode = 1; return }
+    const { repo } = buildContext()
+    const r = repo.recordListing({ dealId: Number(id), listedCents: Math.round(Number(price) * 100) })
+    if (!r.ok) { console.error(r.error); process.exitCode = 1; return }
+    console.log(`recorded: listed #${id} at ${money(Math.round(Number(price) * 100))}`)
+  },
+
+  async inventory () {
+    const { repo } = buildContext()
+    const rows = repo.inventory()
+    if (!rows.length) { console.log('\n  nothing bought yet. `fbay bought <deal_id> <price>` after your first purchase.\n'); return }
+    const days = (t) => t == null ? '' : Math.floor((Date.now() - t) / 86400000) + 'd'
+    console.log('')
+    for (const r of rows) {
+      const state = r.sold_cents != null ? 'SOLD' : r.listed_cents != null ? 'LISTED' : 'HELD'
+      const net = r.sold_cents != null
+        ? r.sold_cents - r.bought_cents - (r.postage_cents ?? 0) - (r.fees_cents ?? 0)
+        : null
+      console.log(`  ${state.padEnd(7)} #${String(r.deal_id).padEnd(4)} ${(r.title ?? '').slice(0, 40)}`)
+      console.log(`          paid ${money(r.bought_cents)}` +
+        (r.listed_cents != null ? ` · listed ${money(r.listed_cents)} (${days(r.listed_at)} ago)` : '') +
+        (r.sold_cents != null ? ` · sold ${money(r.sold_cents)} · net ${money(net)}` : ` · held ${days(r.bought_at)}`))
+    }
+    const open = rows.filter((r) => r.sold_cents == null)
+    const tied = open.reduce((s, r) => s + r.bought_cents, 0)
+    console.log(`\n  ${open.length} unsold · ${money(tied)} of capital tied up\n`)
+  },
+
   async sold (args) {
     const [id, price, postage] = args
     if (!id || !price) { console.error('usage: fbay sold <deal_id> <sale_price> [postage]'); process.exitCode = 1; return }
@@ -681,8 +713,11 @@ const COMMANDS = {
       runOne: async (watch) => {
         // Each watch gets its own page so concurrent scans cannot navigate
         // each other mid-parse. The context, and therefore the login, is shared.
-        const view = await session.openView()
-        const watchSource = createFacebookSource({ session: view, pacer })
+        const isGumtree = (watch.source ?? 'facebook') === 'gumtree'
+        const view = isGumtree ? await openGumtreeSession({ headless: !process.env.FBAY_HEADED }) : await session.openView()
+        const watchSource = isGumtree
+          ? createGumtreeSource({ session: view, pacer })
+          : createFacebookSource({ session: view, pacer })
         try {
           return await runWatch({
             watch, source: watchSource, repo, config, sold, browse: browseClient, notifier, limit,
@@ -735,7 +770,9 @@ daily
 
 results
   fbay bought <id> <price>      record a purchase
+  fbay listed <id> <price>      record listing it for sale
   fbay sold <id> <price> [post] record the sale
+  fbay inventory                what you hold and what it cost
   fbay track                    profit, throughput, estimate accuracy
 
 watches

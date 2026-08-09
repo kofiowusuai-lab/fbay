@@ -202,9 +202,10 @@ export function createRepo (db) {
     },
 
     addWatch (w) {
-      const info = db.prepare(`INSERT INTO watches (name, query, category, city, radius_km, min_price_cents, max_price_cents, sort, interval_minutes, created_at)
-        VALUES (@name, @query, @category, @city, @radiusKm, @minPriceCents, @maxPriceCents, @sort, @intervalMinutes, @createdAt)`).run({
+      const info = db.prepare(`INSERT INTO watches (name, source, query, category, city, radius_km, min_price_cents, max_price_cents, sort, interval_minutes, created_at)
+        VALUES (@name, @source, @query, @category, @city, @radiusKm, @minPriceCents, @maxPriceCents, @sort, @intervalMinutes, @createdAt)`).run({
         name: w.name,
+        source: w.source ?? 'facebook',
         query: w.query,
         category: w.category ?? null,
         city: w.city,
@@ -263,6 +264,25 @@ export function createRepo (db) {
         .run(dealId, boughtCents, boughtAt, notes)
       db.prepare("UPDATE deals SET status='bought', updated_at=? WHERE id=?").run(boughtAt, dealId)
       return { id: info.lastInsertRowid }
+    },
+
+    recordListing ({ dealId, listedCents, listedAt = Date.now() }) {
+      const row = db.prepare('SELECT id FROM outcomes WHERE deal_id = ? ORDER BY id DESC LIMIT 1').get(dealId)
+      if (!row) return { ok: false, error: 'no recorded purchase for that deal - run `fbay bought` first' }
+      db.prepare('UPDATE outcomes SET listed_cents=?, listed_at=? WHERE id=?').run(listedCents, listedAt, row.id)
+      db.prepare("UPDATE deals SET status='listed', updated_at=? WHERE id=?").run(listedAt, dealId)
+      return { ok: true }
+    },
+
+    /** Everything bought and not yet sold - the capital actually at risk. */
+    inventory () {
+      return db.prepare(`SELECT o.*, d.id deal_id, d.net_profit_cents, d.breakeven_buy_cents, d.gross_cents, d.roi,
+        l.title, l.url, l.image_urls, l.city, i.brand, i.model, i.query
+        FROM outcomes o
+        JOIN deals d ON d.id = o.deal_id
+        JOIN listings l ON l.id = d.listing_id
+        LEFT JOIN identities i ON i.identity_key = d.identity_key
+        ORDER BY o.sold_at IS NOT NULL, o.bought_at DESC`).all()
     },
 
     recordSale ({ dealId, soldCents, postageCents = 0, feesCents = 0, soldAt = Date.now(), notes = null }) {

@@ -32,6 +32,14 @@ export function migrate (db) {
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((t) => t.name)
   if (!tables.includes('outcomes')) {
     db.exec(fs.readFileSync(path.join(HERE, 'schema.sql'), 'utf8'))
+  } else {
+    // Additive columns only - outcomes hold real money records and must never
+    // be rebuilt the way the derived comp caches are.
+    const wcols = db.prepare('PRAGMA table_info(watches)').all().map((c) => c.name)
+    if (!wcols.includes('source')) db.exec("ALTER TABLE watches ADD COLUMN source TEXT NOT NULL DEFAULT 'facebook'")
+    const cols = db.prepare('PRAGMA table_info(outcomes)').all().map((c) => c.name)
+    if (!cols.includes('listed_cents')) db.exec('ALTER TABLE outcomes ADD COLUMN listed_cents INTEGER')
+    if (!cols.includes('listed_at')) db.exec('ALTER TABLE outcomes ADD COLUMN listed_at INTEGER')
   }
 
   if (sellThrough && (sellThrough.notnull === 1 || !hasAvailability)) {
