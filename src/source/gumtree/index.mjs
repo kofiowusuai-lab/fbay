@@ -53,14 +53,26 @@ export async function openGumtreeSession ({
  * makes it both cheaper to scan and far less risky per request.
  */
 export function createGumtreeSource ({ session, pacer, clock = Date.now }) {
-  async function scan (watch, { limit = null } = {}) {
+  /**
+   * `limit` is deliberately ignored.
+   *
+   * On Facebook the limit bounds detail-page fetches, which cost a paced
+   * request each. Gumtree puts title, price and location on the search card, so
+   * every listing on the page is already free once the page is loaded - and
+   * truncating there discards candidates before the filters ever see them.
+   * Observed: a 6-item cap kept six overpriced listings from one seller and
+   * dropped the eleven under budget behind them. The caller filters and bounds.
+   */
+  async function scan (watch) {
     const warnings = []
     const url = buildGumtreeUrl({
       query: watch.query,
       city: watch.city,
       distanceMiles: Math.round((watch.radius_km ?? watch.radiusKm ?? 48) * 0.621371),
-      maxPriceCents: watch.max_price_cents ?? watch.maxPriceCents,
-      minPriceCents: watch.min_price_cents ?? watch.minPriceCents,
+      // Gumtree accepts but ignores max_price - verified against live results,
+      // which were identical with and without it. The ceiling is enforced by
+      // prefilter instead, so the parameter is not sent at all rather than
+      // implying a filter that does not happen.
     })
 
     try {
@@ -80,7 +92,7 @@ export function createGumtreeSource ({ session, pacer, clock = Date.now }) {
     const listings = parseGumtreeCards(await session.extractCards(), { now: clock() })
     pacer.countListings(listings.length)
 
-    return { ok: true, listings: limit ? listings.slice(0, limit) : listings, warnings, url }
+    return { ok: true, listings, warnings, url }
   }
 
   return { name: 'gumtree', scan }

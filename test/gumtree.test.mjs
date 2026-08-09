@@ -62,3 +62,39 @@ test('the search url carries location, distance and a price ceiling', () => {
 test('multi-word locations are slugified', () => {
   assert.match(buildGumtreeUrl({ query: 'x', city: 'Milton Keynes' }), /search_location=milton-keynes/)
 })
+
+import { createGumtreeSource } from '../src/source/gumtree/index.mjs'
+import { createPacer } from '../src/source/facebook/pace.mjs'
+import { DEFAULTS } from '../src/config.mjs'
+
+test('gumtree returns the whole page, ignoring limit', async () => {
+  // A limit here would discard candidates before the filters see them: every
+  // listing is already parsed once the page loads, unlike Facebook where each
+  // detail page is a paced request.
+  const cards = Array.from({ length: 20 }, (_, i) => ({
+    href: `/p/tools/item-${i}/150000000${i}`,
+    lines: ['1', `Item ${i}`, 'desc', 'Putney, London', `£${(i + 1) * 20}`],
+    img: null,
+  }))
+  const session = {
+    goto: async () => ({ ok: true, url: 'x', block: { blocked: false, kind: null } }),
+    extractCards: async () => cards,
+  }
+  const pacer = createPacer({ config: DEFAULTS.pace, sleepImpl: async () => {}, rng: () => 0.5 })
+  const src = createGumtreeSource({ session, pacer })
+  const r = await src.scan({ query: 'x', city: 'london', radiusKm: 48, maxPriceCents: 10000 }, { limit: 5 })
+
+  assert.equal(r.ok, true)
+  assert.equal(r.listings.length, 20, 'a source-level cap would hide cheaper listings further down the page')
+})
+
+test('the gumtree url omits the price filter it cannot honour', async () => {
+  let seen = null
+  const session = {
+    goto: async (u) => { seen = u; return { ok: true, url: u, block: { blocked: false, kind: null } } },
+    extractCards: async () => [],
+  }
+  const pacer = createPacer({ config: DEFAULTS.pace, sleepImpl: async () => {}, rng: () => 0.5 })
+  await createGumtreeSource({ session, pacer }).scan({ query: 'x', city: 'london', maxPriceCents: 10000 })
+  assert.ok(!/max_price/.test(seen), 'sending a parameter the site ignores implies a filter that never happens')
+})
