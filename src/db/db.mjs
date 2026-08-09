@@ -29,6 +29,11 @@ export function migrate (db) {
   const sellThrough = cols.find((c) => c.name === 'sell_through')
   const hasAvailability = cols.some((c) => c.name === 'active_count_available')
 
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((t) => t.name)
+  if (!tables.includes('outcomes')) {
+    db.exec(fs.readFileSync(path.join(HERE, 'schema.sql'), 'utf8'))
+  }
+
   if (sellThrough && (sellThrough.notnull === 1 || !hasAvailability)) {
     const schema = fs.readFileSync(path.join(HERE, 'schema.sql'), 'utf8')
     db.exec('PRAGMA foreign_keys = OFF')

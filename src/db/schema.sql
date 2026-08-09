@@ -142,6 +142,19 @@ CREATE TABLE IF NOT EXISTS runs (
   status TEXT NOT NULL DEFAULT 'running'
 );
 
+CREATE TABLE IF NOT EXISTS outcomes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  deal_id INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+  bought_cents INTEGER NOT NULL,
+  sold_cents INTEGER,
+  postage_cents INTEGER,
+  fees_cents INTEGER,
+  bought_at INTEGER NOT NULL,
+  sold_at INTEGER,
+  notes TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_outcomes_deal ON outcomes(deal_id);
+
 CREATE TABLE IF NOT EXISTS canaries (
   name TEXT PRIMARY KEY,
   last_ok_at INTEGER,

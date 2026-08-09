@@ -21,6 +21,7 @@ import { draftOffer } from './notify/draft.mjs'
 import { createTelegramNotifier } from './notify/telegram.mjs'
 import { runAllCanaries, scanningShouldHalt } from './watch/canary.mjs'
 import { runLoop } from './watch/schedule.mjs'
+import { summarise, accuracy } from './stats.mjs'
 
 const CURRENCY_SYMBOLS = { USD: '$', GBP: '\u00A3', EUR: '\u20AC', CAD: 'C$', AUD: 'A$' }
 let currencySymbol = '$'
@@ -500,6 +501,62 @@ const COMMANDS = {
     console.log(r.ok ? '  Test message sent - check Telegram.\n' : `  Saved, but the test send failed: ${r.error}\n`)
   },
 
+  async bought (args) {
+    const [id, price] = args
+    if (!id || !price) { console.error('usage: fbay bought <deal_id> <price_you_paid>'); process.exitCode = 1; return }
+    const { repo } = buildContext()
+    repo.recordBuy({ dealId: Number(id), boughtCents: Math.round(Number(price) * 100) })
+    console.log(`recorded: bought #${id} for ${money(Math.round(Number(price) * 100))}`)
+    console.log('when it sells: fbay sold ' + id + ' <sale_price> [postage]')
+  },
+
+  async sold (args) {
+    const [id, price, postage] = args
+    if (!id || !price) { console.error('usage: fbay sold <deal_id> <sale_price> [postage]'); process.exitCode = 1; return }
+    const { repo } = buildContext()
+    const r = repo.recordSale({
+      dealId: Number(id),
+      soldCents: Math.round(Number(price) * 100),
+      postageCents: postage ? Math.round(Number(postage) * 100) : 0,
+    })
+    if (!r.ok) { console.error(r.error); process.exitCode = 1; return }
+    console.log(`recorded: sold #${id} for ${money(Math.round(Number(price) * 100))}`)
+  },
+
+  async track () {
+    const { repo } = buildContext()
+    const s = summarise(repo.outcomes(), { firstAlertAt: repo.firstAlertAt() })
+    const a = accuracy(repo.outcomesWithPredictions())
+
+    if (!s.flips && !s.open) {
+      console.log('\n  No flips recorded yet.')
+      console.log('  When you buy:  fbay bought <deal_id> <price>')
+      console.log('  When it sells: fbay sold <deal_id> <price> [postage]\n')
+      return
+    }
+
+    console.log('\n  YOUR RESULTS\n')
+    console.log(`  flips completed    ${s.flips}${s.open ? `   (${s.open} still unsold)` : ''}`)
+    console.log(`  net profit         ${money(s.totalNetCents)}`)
+    console.log(`  average per flip   ${money(s.avgNetCents)}`)
+    console.log(`  return on capital  ${s.returnOnCapital == null ? 'n/a' : pct(s.returnOnCapital)}`)
+    console.log(`  avg days to sell   ${s.avgDaysToSell ?? 'n/a'}`)
+
+    console.log('\n  WHAT A SUBSCRIBER WOULD BUY\n')
+    console.log(`  flips per week     ${s.flipsPerWeek ?? 'n/a'}`)
+    console.log(`  net per week       ${money(s.weeklyNetCents)}`)
+    console.log('  (a tool is worth paying for when this clears its own price several times over)')
+
+    if (a.n) {
+      console.log('\n  ESTIMATE ACCURACY\n')
+      console.log(`  compared          ${a.n} flips`)
+      console.log(`  mean error        ${money(a.meanErrorCents)} vs predicted`)
+      console.log(`  direction         ${a.bias}`)
+      if (a.meanErrorCents < 0) console.log('  ! over-predicting lets losing deals through - raise bufferRate in config.json')
+    }
+    console.log('')
+  },
+
   async doctor () {
     const checks = []
     const { config, repo, browse } = buildContext()
@@ -675,6 +732,11 @@ daily
   fbay deals [--status X]       review the pipeline
   fbay message <deal_id>        draft the seller offer
   fbay status <deal_id> <s>     pursuing | bought | passed
+
+results
+  fbay bought <id> <price>      record a purchase
+  fbay sold <id> <price> [post] record the sale
+  fbay track                    profit, throughput, estimate accuracy
 
 watches
   fbay watch add --name X --city nyc --query "macbook" --max 900

@@ -258,6 +258,35 @@ export function createRepo (db) {
       tx()
     },
 
+    recordBuy ({ dealId, boughtCents, boughtAt = Date.now(), notes = null }) {
+      const info = db.prepare('INSERT INTO outcomes (deal_id, bought_cents, bought_at, notes) VALUES (?, ?, ?, ?)')
+        .run(dealId, boughtCents, boughtAt, notes)
+      db.prepare("UPDATE deals SET status='bought', updated_at=? WHERE id=?").run(boughtAt, dealId)
+      return { id: info.lastInsertRowid }
+    },
+
+    recordSale ({ dealId, soldCents, postageCents = 0, feesCents = 0, soldAt = Date.now(), notes = null }) {
+      const row = db.prepare('SELECT id FROM outcomes WHERE deal_id = ? ORDER BY id DESC LIMIT 1').get(dealId)
+      if (!row) return { ok: false, error: 'no recorded purchase for that deal - run `fbay bought` first' }
+      db.prepare('UPDATE outcomes SET sold_cents=?, postage_cents=?, fees_cents=?, sold_at=?, notes=COALESCE(?, notes) WHERE id=?')
+        .run(soldCents, postageCents, feesCents, soldAt, notes, row.id)
+      db.prepare("UPDATE deals SET status='sold', updated_at=? WHERE id=?").run(soldAt, dealId)
+      return { ok: true }
+    },
+
+    outcomes () {
+      return db.prepare('SELECT * FROM outcomes ORDER BY bought_at').all()
+    },
+
+    outcomesWithPredictions () {
+      return db.prepare(`SELECT o.*, d.net_profit_cents, d.breakeven_buy_cents, d.gross_cents, l.title
+        FROM outcomes o JOIN deals d ON d.id = o.deal_id JOIN listings l ON l.id = d.listing_id`).all()
+    },
+
+    firstAlertAt () {
+      return db.prepare("SELECT MIN(created_at) t FROM deals WHERE status IN ('alerted','bought','sold')").get()?.t ?? null
+    },
+
     stats () {
       return {
         listings: db.prepare('SELECT COUNT(*) c FROM listings').get().c,
