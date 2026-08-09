@@ -679,6 +679,31 @@ const COMMANDS = {
   },
 
   async run (args = []) {
+    // Single instance only. Two monitors share one Playwright profile
+    // directory, so the second dies on the profile lock with a cryptic
+    // browser error - and worse, if both did start they would double the
+    // request rate against Facebook, which is the thing most likely to get
+    // the account checkpointed. The pacer's ceiling is per process, so it
+    // cannot protect against a second process.
+    const lockPath = path.join(process.cwd(), '.monitor.lock')
+    if (fs.existsSync(lockPath)) {
+      const prev = Number(fs.readFileSync(lockPath, 'utf8').trim())
+      let alive = false
+      try { process.kill(prev, 0); alive = true } catch { alive = false }
+      if (alive) {
+        console.error(`\n  A monitor is already running (pid ${prev}).`)
+        console.error('  Stop it first:  pkill -f "cli.mjs run"')
+        console.error('  Running two would double the request rate against Facebook.\n')
+        process.exitCode = 1
+        return
+      }
+      fs.unlinkSync(lockPath) // stale lock from a crashed run
+    }
+    fs.writeFileSync(lockPath, String(process.pid))
+    const releaseLock = () => { try { fs.unlinkSync(lockPath) } catch {} }
+    process.on('exit', releaseLock)
+    for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { releaseLock(); process.exit(0) })
+
     const limIdx = args.indexOf('--limit')
     const limit = limIdx !== -1 ? Number(args[limIdx + 1]) : 8
     const parIdx = args.indexOf('--parallel')

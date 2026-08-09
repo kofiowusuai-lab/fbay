@@ -67,8 +67,15 @@ fbay scan --watch macbooks
 fbay scan --watch macbooks --limit 5   # evaluate only the 5 cheapest asks
 fbay scan --dry                        # list what Facebook returns, evaluate nothing
 
-# Run continuously, alerting to Telegram
-fbay run
+# Run continuously, alerting to Telegram (one instance only - see below)
+fbay run --limit 6 --parallel 3
+
+# What you hold
+fbay bought 12 45          # paid GBP45
+fbay listed 12 89          # listed at GBP89
+fbay sold 12 89 4.50       # sold GBP89, postage GBP4.50
+fbay inventory             # capital tied up, what is not moving
+fbay track                 # profit, throughput, estimate accuracy
 
 # Review
 fbay deals
@@ -122,6 +129,14 @@ Copy `config.example.json` to `config.json` and edit. Everything is optional, de
 | `freight.enabled` | false | Include furniture and appliances |
 | `currency` | USD | Rejects comps priced in anything else |
 | `pace.maxListingsPerDay` | 600 | Facebook request budget |
+
+## One monitor at a time
+
+`fbay run` takes a PID lock. A second instance is refused rather than left to
+die on the browser profile lock with an opaque error - and more importantly,
+two monitors would double the request rate against Facebook. The pacer's
+ceiling is per process, so it cannot protect against a second process. Stop the
+running one with `pkill -f "cli.mjs run"` before starting another.
 
 ## Why it will not silently rot
 

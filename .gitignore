@@ -8,3 +8,4 @@ fb-profile/
 ebay-profile/
 dashboard/node_modules/
 dashboard/.next/
+.monitor.lock
