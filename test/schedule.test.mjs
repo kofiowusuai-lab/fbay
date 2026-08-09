@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isQuietHour, dueWatches, jitterMs, runLoop } from '../src/watch/schedule.mjs'
+import { isQuietHour, dueWatches, jitterMs, runLoop, msUntilQuietEnds } from '../src/watch/schedule.mjs'
 
 test('quiet hours wrapping midnight are handled', () => {
   const q = { start: 23, end: 7 }
@@ -116,4 +116,29 @@ test('one throwing watch does not stop the others', async () => {
     },
   })
   assert.deepEqual(done.sort(), ['w1', 'w3'])
+})
+
+test('msUntilQuietEnds targets the next occurrence of the wake hour', () => {
+  const at = (h) => new Date(2026, 7, 9, h, 0, 0).getTime()
+  const q = { start: 23, end: 7 }
+  assert.equal(Math.round(msUntilQuietEnds(at(2), q) / 3600000), 5, '02:00 is five hours from 07:00')
+  assert.equal(Math.round(msUntilQuietEnds(at(23), q) / 3600000), 8, '23:00 wakes at 07:00 tomorrow')
+})
+
+test('quiet hours are announced once, not once per poll', async () => {
+  const lines = []
+  let ticks = 0
+  await runLoop({
+    repo: { listWatches: () => [] },
+    config: { quietHours: { start: 0, end: 23 } },
+    notifier: { notifyAlert: async () => {} },
+    clock: () => new Date(2026, 7, 9, 2, 0, 0).getTime(),
+    sleepImpl: async () => {},
+    shouldContinue: () => ticks++ < 5,
+    logger: { log: (m) => lines.push(m) },
+    runOne: async () => ({ ok: true }),
+  })
+  const quiet = lines.filter((l) => /quiet hours/.test(l))
+  assert.equal(quiet.length, 1, `announced ${quiet.length} times; the log should not fill with duplicates`)
+  assert.match(quiet[0], /sleeping/)
 })
