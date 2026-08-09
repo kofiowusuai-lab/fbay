@@ -828,12 +828,15 @@ const COMMANDS = {
           return await runWatch({
             watch, source: watchSource, repo, config, sold, browse: browseClient, notifier, limit,
             concurrency: parallel,
+            // Same session that scraped it, so the liveness check reuses the
+            // logged-in context rather than hitting a login wall.
+            liveSession: view,
             identifier: ({ listing }) => identify({ listing, repo, llm, config }),
             onProgress: ({ phase, evaluation, listing }) => {
               if (phase === 'detail' || !evaluation) return
               const tag = evaluation.ok
                 ? (evaluation.passed ? `DEAL net ${money(evaluation.profit.netCents)}` : `pass (${evaluation.rejections[0]?.rule ?? 'filtered'})`)
-                : 'needs review'
+                : (evaluation.expired ? 'gone - not alerted' : 'needs review')
               console.log(`  [${new Date().toISOString().slice(11, 19)}] ${watch.name.padEnd(12)} ${money(listing.priceCents).padStart(8)} ${listing.title.slice(0, 34)} -> ${tag}`)
             },
           })

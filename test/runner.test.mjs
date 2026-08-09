@@ -119,3 +119,52 @@ test('a source failure returns ok:false and records a failed run', async () => {
   assert.equal(r.ok, false)
   assert.match(r.error, /blocked/)
 })
+
+test('a listing that has gone is never alerted', async () => {
+  // The operator was getting Telegram cards for listings that showed
+  // "This listing no longer exists" - an alert that cannot be acted on.
+  const d = deps()
+  const source = { scan: async () => ({ ok: true, listings: [LISTING], warnings: [] }) }
+  const notified = []
+  const deadSession = {
+    goto: async () => ({ ok: true, bodyText: 'This listing no longer exists.', block: { blocked: false, kind: null } }),
+  }
+  const r = await runWatch({
+    watch: { id: null, name: 'test', city: 'nyc', query: 'macbook' },
+    source, notifier: { notifyDeal: async (x) => notified.push(x), notifyNearMiss: async (x) => notified.push(x) },
+    liveSession: deadSession, ...d,
+  })
+  assert.equal(notified.length, 0, 'a dead listing must not reach Telegram')
+  assert.equal(r.expired, 1)
+  assert.equal(d.repo.listDeals({ status: 'expired' }).length, 1)
+})
+
+test('a live listing is still alerted', async () => {
+  const d = deps()
+  const source = { scan: async () => ({ ok: true, listings: [LISTING], warnings: [] }) }
+  const notified = []
+  const liveSession = {
+    goto: async () => ({ ok: true, bodyText: 'MacBook Air 13\n$120\nMessage seller', block: { blocked: false, kind: null } }),
+  }
+  const r = await runWatch({
+    watch: { id: null, name: 'test', city: 'nyc', query: 'macbook' },
+    source, notifier: { notifyDeal: async (x) => notified.push(x), notifyNearMiss: async () => {} },
+    liveSession, ...d,
+  })
+  assert.equal(r.dealsFound, 1)
+  assert.equal(notified.length, 1)
+})
+
+test('with no session to check with, the deal is still sent', async () => {
+  // Failing closed here would silently suppress every deal.
+  const d = deps()
+  const source = { scan: async () => ({ ok: true, listings: [LISTING], warnings: [] }) }
+  const notified = []
+  const r = await runWatch({
+    watch: { id: null, name: 'test', city: 'nyc', query: 'macbook' },
+    source, notifier: { notifyDeal: async (x) => notified.push(x), notifyNearMiss: async () => {} },
+    liveSession: null, ...d,
+  })
+  assert.equal(r.dealsFound, 1)
+  assert.equal(notified.length, 1)
+})

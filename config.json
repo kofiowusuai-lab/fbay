@@ -55,7 +55,7 @@
   "alerts": {
     "_comment": "Near misses are sent too, clearly labelled as not-a-buy. Silence is ambiguous: without them there is no way to tell a thin market from a broken scraper from thresholds set too tight.",
     "nearMisses": true,
-    "minNetProfitCents": 2000
+    "minNetProfitCents": 3500
   },
 
   "blacklist": {

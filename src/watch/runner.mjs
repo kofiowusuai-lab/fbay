@@ -3,6 +3,7 @@ import { computeProfit } from '../economics/profit.mjs'
 import { applyFilters, prefilter, isNearMiss } from '../score/filters.mjs'
 import { scoreDeal } from '../score/rank.mjs'
 import { mapPool } from './pool.mjs'
+import { verifyLive } from '../source/liveness.mjs'
 
 /**
  * Runs one listing through identify -> comps -> economics -> filters -> score.
@@ -49,7 +50,7 @@ export async function evaluateListing ({ listing, repo, config, identifier, sold
 }
 
 export async function runWatch ({
-  watch, source, repo, config, identifier, sold, browse, notifier,
+  watch, source, repo, config, identifier, sold, browse, notifier, liveSession = null,
   now = Date.now(),
   fetchDetails = true,
   limit = null,
@@ -62,6 +63,7 @@ export async function runWatch ({
   let listingsNew = 0
   let dealsFound = 0
   let nearMisses = 0
+  let expired = 0
 
   const scan = await source.scan(watch, { fetchDetails, limit, onProgress })
   if (!scan.ok) {
@@ -139,7 +141,24 @@ export async function runWatch ({
 
     onProgress?.({ index, total: queue.length, listing, evaluation: ev })
 
-    if (!ev.passed && config.alerts?.nearMisses && isNearMiss(ev, config.alerts)) {
+    const wantsAlert = ev.passed || (config.alerts?.nearMisses && isNearMiss(ev, config.alerts))
+
+    // Check the listing still exists before spending the operator's attention
+    // on it. Identification and two eBay lookups sit between scraping a listing
+    // and alerting on it, and the listing may already have been hours old - on
+    // a fast category that is long enough for it to be gone.
+    if (wantsAlert) {
+      const live = await verifyLive(listing.url, liveSession)
+      if (!live.live) {
+        expired++
+        errors.push(`${listing.fbId}: not alerted, ${live.reason}`)
+        repo.upsertDeal({ listingId: up.id, status: 'expired', identityKey: ev.identity.identityKey, error: live.reason, now })
+        onProgress?.({ index, total: pending.length, listing, evaluation: { ...ev, expired: true } })
+        return
+      }
+    }
+
+    if (!ev.passed && wantsAlert) {
       nearMisses++
       const comps = ev.compsetId ? repo.compsFor(ev.compsetId) : []
       await notifier.notifyNearMiss?.({
@@ -165,5 +184,5 @@ export async function runWatch ({
 
   if (watch.id) repo.touchWatch(watch.id, now)
   repo.finishRun(runId, { now, listingsSeen, listingsNew, dealsFound, errors, status: 'ok' })
-  return { ok: true, runId, listingsSeen, listingsNew, dealsFound, nearMisses, errors }
+  return { ok: true, runId, listingsSeen, listingsNew, dealsFound, nearMisses, expired, errors }
 }
