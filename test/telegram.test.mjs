@@ -216,3 +216,19 @@ test('deals are never suppressed by the operational setting', async () => {
   await n.notifyDeal({ ...DEAL, listing: { ...DEAL.listing, imageUrls: [] } })
   assert.equal(calls.length, 1, 'the whole point of the chat')
 })
+
+test('the card states how old the listing was when found', () => {
+  // A good deal at a low ask is gone in minutes, so freshness changes how
+  // urgently the operator should act - and without it every alert reads equal.
+  const seenAt = Date.UTC(2026, 7, 9, 12, 0, 0)
+  const fresh = formatDealCard({ ...DEAL, listing: { ...DEAL.listing, listedAt: seenAt - 8 * 60000, seenAt } })
+  assert.match(fresh, /Posted 8m before we saw it/)
+
+  const stale = formatDealCard({ ...DEAL, listing: { ...DEAL.listing, listedAt: seenAt - 5 * 3600000, seenAt } })
+  assert.match(stale, /Posted 5h before we saw it/)
+})
+
+test('a listing with no known post time omits the age line rather than guessing', () => {
+  const text = formatDealCard({ ...DEAL, listing: { ...DEAL.listing, listedAt: null } })
+  assert.ok(!/before we saw it/.test(text))
+})

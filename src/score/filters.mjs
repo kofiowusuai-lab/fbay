@@ -90,9 +90,47 @@ export function applyFilters ({ listing, identity, compset, profit }, config) {
  * surfaced too - labelled, with the one reason they failed, and never as a buy
  * recommendation.
  */
-export function isNearMiss ({ rejections, profit }, { minNetProfitCents = 0 } = {}) {
+/**
+ * A near miss must be NEAR. Counting failed rules is not enough.
+ *
+ * The first version asked only "did exactly one check fail, and is there
+ * profit". That sent a Nintendo Switch with 6% sell-through against a 35%
+ * floor - 665 listed against 43 sold - described as a near miss. It failed one
+ * rule by a factor of six. Marginal alerts are also the ones most likely to be
+ * stale by the time the operator looks at them, so noise here costs twice.
+ *
+ * The failed value must now reach a proportion of its floor to qualify.
+ */
+export const NEAR_MISS_TOLERANCE = 0.7
+
+export function isNearMiss ({ rejections, profit, compset }, config = {}) {
+  const { minNetProfitCents = 0, tolerance = NEAR_MISS_TOLERANCE } = config
   if (!rejections || rejections.length !== 1) return false
   if (profit?.netCents == null || profit.netCents < minNetProfitCents) return false
-  // A blacklisted title or an over-ceiling ask is a hard no, not a near miss.
-  return !['blacklist_keyword', 'blacklist_seller', 'max_ask', 'freight_disabled'].includes(rejections[0].rule)
+
+  const rule = rejections[0].rule
+  // A hard no is never softened into a near miss.
+  if (['blacklist_keyword', 'blacklist_seller', 'max_ask', 'freight_disabled', 'foreign_listing'].includes(rule)) return false
+
+  const t = config.thresholds ?? {}
+  const closeEnough = (actual, floor) =>
+    actual != null && floor != null && floor > 0 && actual >= floor * tolerance
+
+  switch (rule) {
+    case 'min_sell_through':
+      return closeEnough(compset?.sellThrough, t.minSellThrough)
+    case 'min_roi':
+      return closeEnough(profit?.roi, t.minRoi)
+    case 'min_net_profit':
+      return closeEnough(profit?.netCents, t.minNetProfitCents)
+    case 'min_comp_sample':
+      return closeEnough(compset?.sampleN, t.minCompSampleSize)
+    case 'sell_through_unavailable':
+      // Unknown is not near anything; it is unknown.
+      return false
+    default:
+      // An unrecognised rule (e.g. identity confidence) still counts, since
+      // there is no floor to measure closeness against.
+      return true
+  }
 }

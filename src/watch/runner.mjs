@@ -141,7 +141,7 @@ export async function runWatch ({
 
     onProgress?.({ index, total: queue.length, listing, evaluation: ev })
 
-    const wantsAlert = ev.passed || (config.alerts?.nearMisses && isNearMiss(ev, config.alerts))
+    const wantsAlert = ev.passed || (config.alerts?.nearMisses && isNearMiss(ev, { ...config.alerts, thresholds: config.thresholds }))
 
     // Check the listing still exists before spending the operator's attention
     // on it. Identification and two eBay lookups sit between scraping a listing

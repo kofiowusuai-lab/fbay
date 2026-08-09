@@ -24,6 +24,19 @@ function pct (x) {
   return x == null ? 'n/a' : `${Math.round(x * 100)}%`
 }
 
+/**
+ * How old the listing was when found. A good deal at a low ask is gone in
+ * minutes, so "posted 3 hours ago" and "posted 6 minutes ago" call for very
+ * different urgency - and without it every alert reads equally fresh.
+ */
+function ageLine (listedAt, seenAt) {
+  if (!listedAt) return null
+  const mins = Math.round(((seenAt ?? Date.now()) - listedAt) / 60000)
+  if (mins < 60) return `Posted ${mins}m before we saw it`
+  const hrs = Math.round(mins / 60)
+  return hrs < 48 ? `Posted ${hrs}h before we saw it` : `Posted ${Math.round(hrs / 24)}d before we saw it`
+}
+
 function soldDate (ts) {
   if (!ts) return ''
   return ` · ${new Date(ts).toISOString().slice(0, 10)}`
@@ -54,6 +67,9 @@ export function formatDealCard ({ listing, identity, compset, profit, score, pri
   out.push('')
 
   if (priceDrop) out.push(escapeHtml(`Price dropped from ${m(priceDrop.previousPriceCents)}`), '')
+
+  const age = ageLine(listing.listedAt, listing.seenAt)
+  if (age) out.push(escapeHtml(`${age} · act fast`), '')
 
   out.push(`<b>OFFER UP TO ${escapeHtml(m(profit.breakevenBuyCents))}</b>`)
   out.push(escapeHtml(`They are asking ${m(listing.priceCents)} · net ${m(profit.netCents)} · ROI ${pct(profit.roi)}`))

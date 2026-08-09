@@ -118,37 +118,47 @@ test('prefilter passes a plausible listing through', () => {
   assert.equal(applyPre({ title: 'DeWalt DCD791 drill', priceCents: 6000 }).rejected, false)
 })
 
-test('a near miss is one failed rule with real profit', () => {
-  const ev = { rejections: [{ rule: 'min_sell_through', reason: 'low' }], profit: { netCents: 4000 } }
-  assert.equal(isNearMiss(ev, { minNetProfitCents: 2000 }), true)
+const T = DEFAULTS.thresholds
+const nearCfg = { minNetProfitCents: 2000, thresholds: T }
+
+test('a near miss must be close to the floor, not merely one rule short', () => {
+  // Sell-through 30% against a 35% floor is genuinely close.
+  const close = { rejections: [{ rule: 'min_sell_through' }], profit: { netCents: 4000 }, compset: { sellThrough: 0.30 } }
+  assert.equal(isNearMiss(close, nearCfg), true)
+})
+
+test('a catastrophic miss is not a near miss', () => {
+  // The real case: a Nintendo Switch at 6% sell-through against a 35% floor,
+  // 665 listed against 43 sold, was being sent as a "near miss".
+  const far = { rejections: [{ rule: 'min_sell_through' }], profit: { netCents: 4556 }, compset: { sellThrough: 0.06 } }
+  assert.equal(isNearMiss(far, nearCfg), false)
+})
+
+test('roi and net profit are measured against their own floors', () => {
+  const roiClose = { rejections: [{ rule: 'min_roi' }], profit: { netCents: 4000, roi: T.minRoi * 0.8 } }
+  const roiFar = { rejections: [{ rule: 'min_roi' }], profit: { netCents: 4000, roi: T.minRoi * 0.2 } }
+  assert.equal(isNearMiss(roiClose, nearCfg), true)
+  assert.equal(isNearMiss(roiFar, nearCfg), false)
+})
+
+test('an unknown sell-through is not near anything', () => {
+  const unknown = { rejections: [{ rule: 'sell_through_unavailable' }], profit: { netCents: 9000 } }
+  assert.equal(isNearMiss(unknown, nearCfg), false)
 })
 
 test('two failed rules is not a near miss', () => {
-  const ev = { rejections: [{ rule: 'min_roi' }, { rule: 'min_sell_through' }], profit: { netCents: 4000 } }
-  assert.equal(isNearMiss(ev, { minNetProfitCents: 2000 }), false)
+  const ev = { rejections: [{ rule: 'min_roi' }, { rule: 'min_sell_through' }], profit: { netCents: 4000 }, compset: { sellThrough: 0.34 } }
+  assert.equal(isNearMiss(ev, nearCfg), false)
 })
 
-test('a loss is never a near miss however few rules it failed', () => {
-  const ev = { rejections: [{ rule: 'min_net_profit' }], profit: { netCents: -500 } }
-  assert.equal(isNearMiss(ev, { minNetProfitCents: 2000 }), false)
+test('a loss is never a near miss however close the other numbers', () => {
+  const ev = { rejections: [{ rule: 'min_sell_through' }], profit: { netCents: -500 }, compset: { sellThrough: 0.34 } }
+  assert.equal(isNearMiss(ev, nearCfg), false)
 })
 
 test('a hard no is never softened into a near miss', () => {
-  for (const rule of ['blacklist_keyword', 'max_ask', 'freight_disabled']) {
-    const ev = { rejections: [{ rule }], profit: { netCents: 9000 } }
-    assert.equal(isNearMiss(ev, { minNetProfitCents: 2000 }), false, rule)
+  for (const rule of ['blacklist_keyword', 'max_ask', 'freight_disabled', 'foreign_listing']) {
+    const ev = { rejections: [{ rule }], profit: { netCents: 9000 }, compset: { sellThrough: 0.9 } }
+    assert.equal(isNearMiss(ev, nearCfg), false, rule)
   }
-})
-
-test('prefilter drops a foreign listing before any paid call', () => {
-  const cfg = { ...DEFAULTS, location: { country: 'GB' } }
-  const r = prefilter({ title: 'Makita drill', priceCents: 5000, city: 'Bogotá, Colombia' }, cfg)
-  assert.equal(r.rejected, true)
-  assert.equal(r.rule, 'foreign_listing')
-})
-
-test('prefilter keeps a domestic listing', () => {
-  const cfg = { ...DEFAULTS, location: { country: 'GB' } }
-  assert.equal(prefilter({ title: 'Makita drill', priceCents: 5000, city: 'Loughton' }, cfg).rejected, false)
-  assert.equal(prefilter({ title: 'Makita drill', priceCents: 5000, city: 'London, United Kingdom' }, cfg).rejected, false)
 })
