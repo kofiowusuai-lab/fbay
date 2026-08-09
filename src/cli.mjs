@@ -23,6 +23,7 @@ import { createTelegramNotifier } from './notify/telegram.mjs'
 import { runAllCanaries, scanningShouldHalt } from './watch/canary.mjs'
 import { runLoop } from './watch/schedule.mjs'
 import { summarise, accuracy } from './stats.mjs'
+import { writeAgents, loadAgent, unloadAgent, agentRunning, LABELS } from './install.mjs'
 
 const CURRENCY_SYMBOLS = { USD: '$', GBP: '\u00A3', EUR: '\u20AC', CAD: 'C$', AUD: 'A$' }
 let currencySymbol = '$'
@@ -589,6 +590,86 @@ const COMMANDS = {
     console.log('')
   },
 
+  async install () {
+    const dir = process.cwd()
+    const { detectAuth } = await import('./llm.mjs')
+    const auth = detectAuth(process.env, fs)
+    const provider = auth.provider === 'codex' ? 'codex' : null
+
+    console.log('\n  Installing FBay as a background service.\n')
+    const paths = writeAgents({ dir, nodeBin: process.execPath, provider })
+    console.log('  wrote', paths.monitor.replace(process.env.HOME, '~'))
+    console.log('  wrote', paths.dashboard.replace(process.env.HOME, '~'))
+
+    // The monitor's own PID lock would refuse the service if a manual run is up.
+    try { fs.unlinkSync(path.join(dir, '.monitor.lock')) } catch {}
+
+    for (const label of [LABELS.monitor, LABELS.dashboard]) {
+      try {
+        await loadAgent(label)
+        console.log('  started', label)
+      } catch (e) {
+        console.error('  failed to start', label + ':', String(e.message ?? e).split('\n')[0])
+      }
+    }
+
+    console.log('\n  It now starts at login and restarts itself if it crashes.')
+    console.log('  Dashboard: http://localhost:3737')
+    console.log('  Check any time: fbay status')
+    console.log('  Remove with:   fbay uninstall\n')
+  },
+
+  async uninstall () {
+    for (const label of [LABELS.monitor, LABELS.dashboard]) {
+      await unloadAgent(label)
+      try { fs.unlinkSync(path.join(process.env.HOME, 'Library', 'LaunchAgents', label + '.plist')) } catch {}
+      console.log('removed', label)
+    }
+    console.log('\nFBay will no longer run in the background.')
+  },
+
+  async status () {
+    const { repo, config } = buildContext()
+    const mon = await agentRunning(LABELS.monitor)
+    const dash = await agentRunning(LABELS.dashboard)
+
+    const state = (a, manualPid) => a.running
+      ? `running (service, pid ${a.pid})`
+      : a.installed ? 'installed but STOPPED'
+      : manualPid ? `running manually (pid ${manualPid}) - not a service, will not survive a reboot`
+      : 'NOT RUNNING - fbay install'
+
+    let manual = null
+    try {
+      const pid = Number(fs.readFileSync(path.join(process.cwd(), '.monitor.lock'), 'utf8').trim())
+      process.kill(pid, 0)
+      manual = pid
+    } catch { manual = null }
+
+    console.log('\n  monitor    ', state(mon, manual))
+    console.log('  dashboard  ', dash.running ? 'http://localhost:3737' : state(dash, null))
+
+    const st = repo.stats()
+    const alerted = repo.listDeals({ status: 'alerted', limit: 500 }).length
+    const inv = repo.inventory()
+    const open = inv.filter((r) => r.sold_cents == null)
+    const s = summarise(inv, { firstAlertAt: repo.firstAlertAt() })
+
+    console.log(`\n  watches     ${st.watches}`)
+    console.log(`  evaluated   ${st.deals}`)
+    console.log(`  deals found ${alerted}`)
+    console.log(`  holding     ${open.length} item${open.length === 1 ? '' : 's'}, ${money(open.reduce((a, r) => a + r.bought_cents, 0))} tied up`)
+    console.log(`  realised    ${money(s.totalNetCents)} across ${s.flips} flip${s.flips === 1 ? '' : 's'}`)
+
+    const last = repo.db.prepare('SELECT MAX(finished_at) t FROM runs').get()?.t
+    if (last) {
+      const mins = Math.round((Date.now() - last) / 60000)
+      const quiet = mins > 180
+      console.log(`  last scan   ${mins} min ago${quiet ? '   <-- stale, check monitor.log' : ''}`)
+    }
+    console.log('')
+  },
+
   async doctor () {
     const checks = []
     const { config, repo, browse } = buildContext()
@@ -780,6 +861,9 @@ const COMMANDS = {
 const HELP = `fbay - Facebook Marketplace to eBay arbitrage
 
 setup
+  fbay install                  run in the background, start at login
+  fbay status                   is it running, what has it found
+  fbay uninstall                stop running in the background
   fbay login                    log into Facebook once (opens a browser)
   fbay ebay-login               sign into eBay once (sold listings need it)
   fbay telegram-setup           link your Telegram chat for alerts
