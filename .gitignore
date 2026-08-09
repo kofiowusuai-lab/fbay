@@ -9,3 +9,7 @@ ebay-profile/
 dashboard/node_modules/
 dashboard/.next/
 .monitor.lock
+gumtree-profile/
+*.log
+*.plist
+.DS_Store
