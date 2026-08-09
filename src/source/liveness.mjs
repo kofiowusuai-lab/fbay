@@ -7,14 +7,28 @@
  * lookups, and may already have been hours old when scraped - so on a fast
  * category it can easily be gone.
  */
+/**
+ * Facebook words a dead listing differently per surface, so matching one string
+ * is not enough: the mobile app shows "This listing no longer exists", while
+ * the desktop web page shows "This page isn't available. The link may be
+ * broken, or the page may have been removed." An earlier version only matched a
+ * "Sorry, this page isn't available" variant that desktop never produces, so
+ * removed listings sailed through as live and reached the operator's phone.
+ *
+ * Verified against a real removed-listing page, not assumed.
+ */
 const DEAD_MARKERS = [
   /this listing no longer exists/i,
+  /this page isn'?t available/i,
+  /the link may be broken/i,
+  /the page may have been removed/i,
   /listing (is )?(no longer available|has been removed|not available)/i,
   /content (isn'?t|is not) available/i,
-  /sorry, this (page|content) isn'?t available/i,
+  /sorry, (something went wrong|this (page|content) isn'?t available)/i,
   /this ad has (expired|been removed)/i,
-  /ad not found/i,
+  /ad (not found|no longer available)/i,
   /page not found/i,
+  /we couldn'?t find (the|that) (page|listing)/i,
 ]
 
 const SOLD_MARKERS = [

@@ -53,3 +53,34 @@ test('a dead page is reported as not live', async () => {
   assert.equal(r.checked, true)
   assert.match(r.reason, /removed/)
 })
+
+test("facebook desktop wording is detected, not just the mobile string", () => {
+  // Captured verbatim from a real removed listing loaded in the browser the
+  // scraper actually uses. Only matching the mobile app's wording let removed
+  // listings through as live.
+  const desktop = "1 unread chats\n1\nNumber of unread notifications\n20+\nThis page isn't available\nThe link may be broken, or the page may have been removed. Check to see if the link you're trying to open is correct."
+  const r = classifyPage({ bodyText: desktop })
+  assert.equal(r.live, false)
+  assert.match(r.reason, /removed/)
+})
+
+test('the mobile wording still matches', () => {
+  assert.equal(classifyPage({ bodyText: 'This listing no longer exists.\nBack' }).live, false)
+})
+
+test('a real live listing is not caught by the wider patterns', () => {
+  // The widened markers must not start binning good listings.
+  const live = 'Marketplace\nDeWalt DCD796 Combi Drill 18V\n£85\nListed 2 hours ago in London\nCondition: Used - Good\nMessage seller\nSave\nShare\nAvailable'
+  assert.equal(classifyPage({ bodyText: live }).live, true)
+})
+
+test('description text does not accidentally trip the removal markers', () => {
+  // The markers match contiguous phrases, so a seller writing around those
+  // words does not get their live listing suppressed.
+  const cases = [
+    'Vintage lamp\n£20\nSeller notes: the link in my other ad may be broken',
+    'Drill\n£40\nThis page isn\'t the one I meant to post',
+    'Camera\n£90\nNo longer available in shops, brand new',
+  ]
+  for (const t of cases) assert.equal(classifyPage({ bodyText: t }).live, true, t.slice(0, 40))
+})
