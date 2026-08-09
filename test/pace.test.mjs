@@ -83,3 +83,36 @@ test('shouldFetchDetail respects the configured ratio deterministically', () => 
   assert.equal(pacer.shouldFetchDetail(0.2), true)
   assert.equal(pacer.shouldFetchDetail(0.9), false)
 })
+
+test('the daily listing budget rolls over to a new day', () => {
+  // Without a rollover the counter only accumulates: the monitor hits the
+  // ceiling once and then reports "0 seen" on every watch forever, which reads
+  // as an empty market rather than a dead budget.
+  let t = new Date(2026, 7, 9, 12, 0, 0).getTime()
+  const pacer = createPacer({
+    config: { ...DEFAULTS.pace, maxListingsPerDay: 100 },
+    clock: () => t,
+    sleepImpl: async () => {},
+    rng: () => 0.5,
+  })
+
+  pacer.countListings(100)
+  assert.equal(pacer.listingBudgetExhausted(), true)
+
+  t = new Date(2026, 7, 10, 8, 0, 0).getTime() // next morning
+  assert.equal(pacer.listingBudgetExhausted(), false, 'a new day must restore the budget')
+  assert.equal(pacer.listingBudgetRemaining(), 100)
+})
+
+test('the budget is not reset by the clock merely advancing within a day', () => {
+  let t = new Date(2026, 7, 9, 9, 0, 0).getTime()
+  const pacer = createPacer({
+    config: { ...DEFAULTS.pace, maxListingsPerDay: 100 },
+    clock: () => t,
+    sleepImpl: async () => {},
+    rng: () => 0.5,
+  })
+  pacer.countListings(60)
+  t = new Date(2026, 7, 9, 22, 0, 0).getTime()
+  assert.equal(pacer.listingBudgetRemaining(), 40, 'same day, budget must persist')
+})

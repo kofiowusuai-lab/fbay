@@ -90,6 +90,19 @@ export const HOME_COUNTRY_PATTERNS = {
   US: /^(united states|usa|us)$/i,
 }
 
+/**
+ * Countries seen in the wild on Marketplace listings. The trailing segment of a
+ * location is only treated as a country when it actually looks like one.
+ *
+ * The first version tested "is the trailing segment my country?" and rejected
+ * everything else. That works for Facebook, which writes "Town, Country", and
+ * silently binned every Gumtree listing, which writes "Area, City" - "Putney,
+ * London" was read as being in a country called London. Rejecting a whole
+ * marketplace is a far worse failure than letting an unrecognised location
+ * through, so the default is now to accept.
+ */
+const FOREIGN_COUNTRY_RE = /^(colombia|spain|españa|france|germany|deutschland|italy|italia|portugal|poland|polska|romania|netherlands|belgium|ireland|mexico|m[ée]xico|brazil|brasil|argentina|chile|peru|per[uú]|united states|usa|canada|australia|india|pakistan|nigeria|ghana|kenya|south africa|turkey|t[uü]rkiye|greece|sweden|norway|denmark|finland|austria|switzerland|czechia|hungary|bulgaria|croatia|morocco|egypt|uae|united arab emirates|philippines|indonesia|malaysia|thailand|vietnam|china|japan|korea)$/i
+
 export function listingCountry (city) {
   if (!city) return null
   const parts = String(city).split(',').map((p) => p.trim()).filter(Boolean)
@@ -99,6 +112,11 @@ export function listingCountry (city) {
 export function isDomestic (city, country = 'GB') {
   const tail = listingCountry(city)
   if (!tail) return true // a bare town name is local by construction
-  const pattern = HOME_COUNTRY_PATTERNS[country]
-  return pattern ? pattern.test(tail) : true
+
+  const home = HOME_COUNTRY_PATTERNS[country]
+  if (home?.test(tail)) return true
+
+  // Only reject when the tail is recognisably a DIFFERENT country. A county or
+  // city ("Putney, London", "Aveley, Essex") is not a country and is local.
+  return !FOREIGN_COUNTRY_RE.test(tail)
 }

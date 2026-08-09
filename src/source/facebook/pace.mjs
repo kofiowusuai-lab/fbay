@@ -17,6 +17,7 @@ export function createPacer ({
 }) {
   let requestTimes = []
   let listingsCounted = 0
+  let countingDay = null
   let lastRequestAt = null
   let blockCount = 0
   let cooldownUntil = 0
@@ -24,6 +25,20 @@ export function createPacer ({
   function pruneWindow () {
     const cutoff = clock() - HOUR_MS
     requestTimes = requestTimes.filter((t) => t > cutoff)
+  }
+
+  /**
+   * A DAILY budget has to roll over. Without this the counter only ever
+   * accumulates, so a long-running monitor hits the ceiling once and then
+   * refuses to scan anything for the rest of its life - reporting "0 seen" on
+   * every watch, which reads as an empty market rather than a dead budget.
+   */
+  function rollDay () {
+    const today = new Date(clock()).toDateString()
+    if (countingDay !== today) {
+      countingDay = today
+      listingsCounted = 0
+    }
   }
 
   function cooldownMs () {
@@ -56,9 +71,9 @@ export function createPacer ({
       requestTimes.push(lastRequestAt)
     },
 
-    countListings (n) { listingsCounted += n },
-    listingBudgetRemaining () { return Math.max(0, config.maxListingsPerDay - listingsCounted) },
-    listingBudgetExhausted () { return listingsCounted >= config.maxListingsPerDay },
+    countListings (n) { rollDay(); listingsCounted += n },
+    listingBudgetRemaining () { rollDay(); return Math.max(0, config.maxListingsPerDay - listingsCounted) },
+    listingBudgetExhausted () { rollDay(); return listingsCounted >= config.maxListingsPerDay },
 
     shouldFetchDetail (r = rng()) { return r < config.detailFetchRatio },
 
@@ -73,6 +88,7 @@ export function createPacer ({
 
     stats () {
       pruneWindow()
+      rollDay()
       return {
         requestsThisHour: requestTimes.length,
         listingsCounted,

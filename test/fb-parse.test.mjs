@@ -91,3 +91,27 @@ test('listingCountry takes the trailing segment only', () => {
   assert.equal(listingCountry('Bogotá, Colombia'), 'Colombia')
   assert.equal(listingCountry('Loughton'), null)
 })
+
+test('a UK area-and-city location is domestic, not foreign', () => {
+  // Gumtree writes "Area, City", not "Town, Country". Reading the trailing
+  // segment as a country made "Putney, London" a listing in a country called
+  // London, and silently binned every Gumtree result.
+  assert.equal(isDomestic('Putney, London', 'GB'), true)
+  assert.equal(isDomestic('Norbury, London', 'GB'), true)
+  assert.equal(isDomestic('Aveley, Essex', 'GB'), true)
+  assert.equal(isDomestic('Wembley, London', 'GB'), true)
+  assert.equal(isDomestic('Barming, Kent, United Kingdom', 'GB'), true)
+})
+
+test('a recognisable foreign country is still rejected', () => {
+  assert.equal(isDomestic('Bogotá, Colombia', 'GB'), false)
+  assert.equal(isDomestic('Madrid, Spain', 'GB'), false)
+  assert.equal(isDomestic('Austin, United States', 'GB'), false)
+  assert.equal(isDomestic('Lyon, France', 'GB'), false)
+})
+
+test('an unrecognised trailing segment is accepted, not binned', () => {
+  // Rejecting a whole marketplace is a far worse failure than letting one
+  // unfamiliar location through, so the default leans toward accepting.
+  assert.equal(isDomestic('Somewhere, Rutland', 'GB'), true)
+})
